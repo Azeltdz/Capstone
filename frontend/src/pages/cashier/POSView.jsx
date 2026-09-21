@@ -5,6 +5,9 @@ import DineInDetailsModal from "./pos/DineInDetailsModal";
 import TableStep from "./pos/TableStep";
 import MenuStep from "./pos/MenuStep";
 import CartPanel from "./pos/CartPanel";
+import OrderPlacedModal from "./pos/OrderPlacedModal";
+
+const ORDER_ID = "#TXN-0248"; // mock — the real id will come from the backend
 
 export default function POSView() {
   const [step, setStep] = useState("type"); // "type" | "table" | "menu"
@@ -14,6 +17,7 @@ export default function POSView() {
   const [table, setTable] = useState(null);
   const [cart, setCart] = useState({}); // { [itemId]: { id, name, price, qty } }
   const [paymentMethod, setPaymentMethod] = useState(null); // "Cash" | "GCash" | null
+  const [placedOrder, setPlacedOrder] = useState(null); // snapshot shown in the "Order Placed" popup
 
   function resetOrder() {
     setStep("type");
@@ -23,6 +27,7 @@ export default function POSView() {
     setTable(null);
     setCart({});
     setPaymentMethod(null);
+    setPlacedOrder(null);
   }
 
   function handleOrderTypeSelect(type) {
@@ -64,10 +69,19 @@ export default function POSView() {
     }
   }
 
-  function handlePlaceOrder() {
+  function handlePlaceOrder(totals) {
     // Real version later: POST /api/transactions with { orderType, customer, table, cart, paymentMethod }
-    alert("Order placed! (this will save to the real backend once that endpoint exists)");
-    resetOrder();
+    // and use the id returned by the backend. For now, snapshot everything into the popup.
+    setPlacedOrder({
+      id: ORDER_ID,
+      orderType,
+      table,
+      customer,
+      paymentMethod,
+      placedAt: new Date().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }),
+      lines: Object.values(cart),
+      ...totals, // itemCount, subtotal, tax, total
+    });
   }
 
   function backFromMenu() {
@@ -93,6 +107,7 @@ export default function POSView() {
       )}
 
       <CartPanel
+        orderId={ORDER_ID}
         step={step}
         orderType={orderType}
         customer={customer}
@@ -103,6 +118,8 @@ export default function POSView() {
         onSelectPayment={setPaymentMethod}
         onPlaceOrder={handlePlaceOrder}
       />
+
+      {placedOrder && <OrderPlacedModal order={placedOrder} onClose={resetOrder} />}
 
       {showDetailsModal && (
         <DineInDetailsModal onSubmit={handleDetailsSubmit} onClose={() => setShowDetailsModal(false)} />

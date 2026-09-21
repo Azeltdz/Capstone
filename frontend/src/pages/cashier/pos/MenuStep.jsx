@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { getMenuCategories, getMenuItems } from "../../../api/mockCashier";
 
-export default function MenuStep({ cart, onQtyChange, onBack }) {
+// stepNumber comes from POSView: 3 for Dine-in (type → table → menu), 2 for Take-out/Delivery.
+export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
   const [categories, setCategories] = useState(null);
   const [categoriesError, setCategoriesError] = useState("");
   const [activeCategory, setActiveCategory] = useState(null);
@@ -43,7 +44,7 @@ export default function MenuStep({ cart, onQtyChange, onBack }) {
       <button className="back-link" onClick={onBack}>
         ← Back
       </button>
-      <h2 className="step-label">Step 3 — Select menu items</h2>
+      <h2 className="step-label">Step {stepNumber} — Select menu items</h2>
       <p className="step-sub">Choose a category, then add items to the order</p>
 
       <div className="category-grid">

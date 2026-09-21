@@ -2,12 +2,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import profilePic from "../assets/profile.jpg";
 
 const EYE_OPEN_PATH =
   "M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z";
 
 const EYE_SLASH_PATH =
-  "M12 6c1.66 0 3 1.34 3 3 0 .35-.07.69-.18 1L17.6 12.79c.65-.85 1.14-1.81 1.4-2.79-1.73-4.39-6-7.5-11-7.5-1.27 0-2.49.2-3.64.57l1.65 1.65C7.09 4.15 8 4 9 4c0 0 3 0 3 2zM2.71 3.16 1.29 4.57 4.5 7.78C3.06 8.89 1.89 10.34 1 12c1.73 4.39 6 7.5 11 7.5 1.53 0 2.98-.29 4.29-.82l3.02 3.02 1.41-1.41L2.71 3.16zM12 17c-2.76 0-5-2.24-5-5 0-.71.16-1.38.42-1.99l1.57 1.57c-.02.14-.03.28-.03.42 0 1.66 1.34 3 3 3 .14 0 .28-.01.42-.03l1.57 1.57c-.61.27-1.28.46-1.95.46zm2.97-5.33L9.67 6.37c.44-.24.94-.37 1.33-.37 1.66 0 3 1.34 3 3 0 .39-.13.89-.03 1.33-.05.01 1 1 1 1z";
+  "M2.71 3.27 1.29 4.69l3.17 3.17A10.94 10.94 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.63 0 3.17-.31 4.57-.87l3.14 3.14 1.42-1.42L2.71 3.27zM12 17c-2.76 0-5-2.24-5-5 0-1.1.36-2.12.96-2.94l1.42 1.42A3 3 0 0 0 12 15c.39 0 .77-.08 1.11-.22l1.57 1.57c-.82.41-1.73.65-2.68.65zm2.97-2.97-1.46-1.46A3 3 0 0 0 12 9c-.39 0-.77.08-1.11.22L9.43 7.76A5 5 0 0 1 17 12c0 .75-.17 1.47-.47 2.03L14.97 14.03zM12 6.5c3.2 0 6.08 1.83 7.67 5.5-.44 1.01-1.05 1.9-1.79 2.65l1.42 1.42A12.2 12.2 0 0 0 23 12C21.27 7.61 17 4.5 12 4.5c-1.03 0-2.03.13-2.98.38l1.57 1.57c.46-.03.93-.05 1.41-.05z";
 
 export default function LoginPage() {
   const [role, setRole] = useState("owner");
@@ -56,7 +57,7 @@ export default function LoginPage() {
         <img
           className="login-logo"
           alt="Filipee's Bistro logo"
-          src="https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=200&h=200&fit=crop"
+          src={profilePic}
         />
         <h1 className="login-title">Filipee's Bistro</h1>
         <p className="login-tagline">Masarap na Mura pa, Saan ka pa!</p>
@@ -81,21 +82,27 @@ export default function LoginPage() {
               id="password"
               type={showPassword ? "text" : "password"}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPassword(value);
+                if (!value) setShowPassword(false);
+              }}
               onKeyDown={handleKeyDown}
               placeholder="Enter your password"
               autoComplete="current-password"
             />
-            <button
-              type="button"
-              className="eye-toggle"
-              onClick={() => setShowPassword((s) => !s)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              <svg viewBox="0 0 24 24">
-                <path d={showPassword ? EYE_SLASH_PATH : EYE_OPEN_PATH} />
-              </svg>
-            </button>
+            {password.length > 0 && (
+              <button
+                type="button"
+                className="eye-toggle"
+                onClick={() => setShowPassword((s) => !s)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                <svg viewBox="0 0 24 24">
+                  <path d={showPassword ? EYE_SLASH_PATH : EYE_OPEN_PATH} />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 

@@ -2,7 +2,7 @@
 const TAX_RATE = 0.0525; // 5.25%, matches the reference layout's tax line
 const PAYMENT_METHODS = ["Cash", "GCash"];
 
-export default function CartPanel({ step, orderType, customer, table, cart, onQtyChange, paymentMethod, onSelectPayment, onPlaceOrder }) {
+export default function CartPanel({ orderId, step, orderType, customer, table, cart, onQtyChange, paymentMethod, onSelectPayment, onPlaceOrder }) {
   const lines = Object.values(cart);
   const itemCount = lines.reduce((sum, l) => sum + l.qty, 0);
   const subtotal = lines.reduce((sum, l) => sum + l.qty * l.price, 0);
@@ -19,7 +19,7 @@ export default function CartPanel({ step, orderType, customer, table, cart, onQt
     <aside className="order-panel">
       <div className="order-panel-header">
         <h3>Current Order</h3>
-        <span className="order-id">#TXN-0248</span>
+        <span className="order-id">{orderId}</span>
       </div>
 
       {showCustomer && (
@@ -132,7 +132,7 @@ export default function CartPanel({ step, orderType, customer, table, cart, onQt
             <button className="btn btn-outline" onClick={() => alert("Receipt would print here.")} disabled={lines.length === 0}>
               Print Receipt
             </button>
-            <button className="btn btn-navy" onClick={onPlaceOrder} disabled={!canPlaceOrder}>
+            <button className="btn btn-navy" onClick={() => onPlaceOrder({ itemCount, subtotal, tax, total })} disabled={!canPlaceOrder}>
               Place Order
             </button>
           </div>

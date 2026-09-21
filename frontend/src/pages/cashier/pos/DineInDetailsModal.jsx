@@ -61,21 +61,6 @@ export default function DineInDetailsModal({ onSubmit, onClose }) {
             />
             {nameError && <span className="form-error">{nameError}</span>}
           </div>
-
-          <div className="form-field">
-            <label className="form-label" htmlFor="customer-phone">
-              Customer Phone <span className="form-optional">(optional)</span>
-            </label>
-            <input
-              id="customer-phone"
-              className="form-input"
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+63 9XX XXX XXXX"
-            />
-          </div>
-
           <div className="form-field">
             <span className="form-label" id="guest-label">
               Guest
