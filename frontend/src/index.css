@@ -3,6 +3,7 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  text-decoration: none;
 }
 
 :root {
@@ -22,6 +23,7 @@
   --radius: 0.75rem;
   --radius-sm: 0.5rem;
   --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  --topbar-h: 4rem;
 }
 
 body {
@@ -48,6 +50,9 @@ h2, h3 { line-height: 1.3; }
   padding: 0.875rem 1.5rem;
   flex-wrap: wrap;
   gap: 0.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .topbar-left {
@@ -119,7 +124,7 @@ h2, h3 { line-height: 1.3; }
 /* ===== Layout ===== */
 .layout {
   display: flex;
-  min-height: calc(100vh - 4rem);
+  min-height: calc(100vh - var(--topbar-h));
 }
 
 /* ===== Sidebar ===== */
@@ -131,6 +136,11 @@ h2, h3 { line-height: 1.3; }
   padding: 1.5rem 1rem;
   display: flex;
   flex-direction: column;
+  position: sticky;
+  top: var(--topbar-h);
+  align-self: flex-start;
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
 }
 
 .sidebar-label {
@@ -166,12 +176,12 @@ h2, h3 { line-height: 1.3; }
 }
 
 .nav-item:hover {
-  background: #f0f2f5;
+  background: var(--blue-accent);
 }
 
 .nav-item.active {
-  background: #e8f0fe;
-  color: var(--navy);
+  background: var(--navy-dark);
+  color: var(--border);
   font-weight: 700;
 }
 
@@ -564,6 +574,90 @@ h2, h3 { line-height: 1.3; }
 .legend-swatch.navy { background: var(--navy); }
 .legend-swatch.blue { background: var(--blue-accent); }
 .legend-swatch.faded { background: #c7cdd6; }
+
+.menu-toolbar { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  flex-wrap: wrap; 
+  gap: 12px; 
+  margin-bottom: 12px; 
+}
+
+.menu-toolbar-controls { 
+  display: flex; 
+  gap: 8px; 
+  flex-wrap: wrap; 
+}
+
+.menu-input { 
+  padding: 8px 10px; 
+  border: 1px solid #ccd; 
+  border-radius: 6px; 
+  font: inherit; 
+}
+
+.menu-btn { 
+  padding: 7px 12px;
+  border: 1px solid #ccd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+.menu-btn-primary { background: #1e3a5f;
+  border-color: #1e3a5f;
+  color: #fff;
+}
+.menu-btn-danger { color: #c0392b;
+  border-color: #c0392b;
+  margin-left: 6px;
+}
+.menu-table-wrap { overflow-x: auto;
+}
+.menu-table { width: 100%;
+  border-collapse: collapse;
+}
+.menu-table th, .menu-table td { text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+.menu-actions-col { text-align: right !important;
+  white-space: nowrap;
+}
+.menu-backdrop { position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.menu-modal { background: #fff;
+  padding: 20px;
+  border-radius: 10px;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.menu-field { display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.menu-modal-actions { display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.menu-newcat { 
+  display: flex; 
+  gap: 8px; 
+}
+
+.menu-newcat-icon { width: 70px; }
+.menu-newcat-name { flex: 1; }
 
 /* ===== Tables ===== */
 .table-wrap {
@@ -961,6 +1055,9 @@ td.align-right {
     flex-direction: row;
     overflow-x: auto;
     gap: 0.5rem;
+    height: auto;
+    top: var(--topbar-h);
+    z-index: 90;
   }
 
   .sidebar-label {
@@ -1834,6 +1931,21 @@ td.align-right {
   font-weight: 600;
   cursor: pointer;
 }
+
+.btn-view {
+  padding: 4px 14px;
+  border: 1px solid #222;
+  border-radius: 6px;
+  background: transparent;
+  color: #222;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-view:hover { background: #222; color: #fff; }
+.btn-view:focus-visible { outline: 2px solid #2f6fd6; outline-offset: 2px; }
+
+.empty-cell { text-align: center; padding: 24px; color: #777; }
 
 /* ===== Cashier: Orders view (card grid) ===== */
 .status-tabs {

@@ -52,6 +52,10 @@ export async function getTransactionsData() {
   await delay();
   return {
     stats: { totalToday: 12660, count: 98, avgOrder: 129.18, paymentSplit: "55% / 37% / 8%" },
+    branchStats: {
+      Poblacion: { totalToday: 8450, count: 64, avgOrder: 132.03, paymentSplit: "57% / 35% / 8%" },
+      "San Roque": { totalToday: 4210, count: 34, avgOrder: 123.82, paymentSplit: "51% / 41% / 8%" },
+    },
     weeklyTrend: [
       { day: "Mon", poblacion: 70, sanRoque: 35 },
       { day: "Tue", poblacion: 68, sanRoque: 32 },
@@ -62,10 +66,40 @@ export async function getTransactionsData() {
       { day: "Sun(est)", poblacion: 65, sanRoque: 30, projected: true },
     ],
     rows: [
-      { id: "#TXN-0247", branch: "Poblacion", cashier: "Maria C.", time: "11:42 AM", type: "Dine-in T3", typeKey: "Dine-in", total: 270.0, payment: "GCash" },
-      { id: "#TXN-0246", branch: "Poblacion", cashier: "Maria C.", time: "11:35 AM", type: "Delivery", typeKey: "Delivery", total: 320.0, payment: "Cash" },
-      { id: "#TXN-0238", branch: "San Roque", cashier: "Jose R.", time: "11:18 AM", type: "Take-out", typeKey: "Take-out", total: 185.0, payment: "Card" },
-      { id: "#TXN-0229", branch: "San Roque", cashier: "Jose R.", time: "10:55 AM", type: "Dine-in T5", typeKey: "Dine-in", total: 190.0, payment: "GCash" },
+      {
+        id: "#TXN-0247", branch: "Poblacion", cashier: "Maria C.", time: "11:42 AM",
+        type: "Dine-in T3", typeKey: "Dine-in", total: 270.0, payment: "GCash",
+        items: [
+          { name: "Lomi Special", qty: 2, price: 95.0 },
+          { name: "Chami Plain", qty: 1, price: 70.0 },
+          { name: "Iced Tea", qty: 1, price: 10.0 },
+        ],
+      },
+      {
+        id: "#TXN-0246", branch: "Poblacion", cashier: "Maria C.", time: "11:35 AM",
+        type: "Delivery", typeKey: "Delivery", total: 320.0, payment: "Cash",
+        items: [
+          { name: "Lechon Chami", qty: 2, price: 110.0 },
+          { name: "Chicken Lomi", qty: 1, price: 85.0 },
+          { name: "Delivery Fee", qty: 1, price: 15.0 },
+        ],
+      },
+      {
+        id: "#TXN-0238", branch: "San Roque", cashier: "Jose R.", time: "11:18 AM",
+        type: "Take-out", typeKey: "Take-out", total: 185.0, payment: "Card",
+        items: [
+          { name: "Lomi Special", qty: 1, price: 95.0 },
+          { name: "Bangsilog", qty: 1, price: 90.0 },
+        ],
+      },
+      {
+        id: "#TXN-0229", branch: "San Roque", cashier: "Jose R.", time: "10:55 AM",
+        type: "Dine-in T5", typeKey: "Dine-in", total: 190.0, payment: "GCash",
+        items: [
+          { name: "Tapsilog", qty: 1, price: 100.0 },
+          { name: "Bangsilog", qty: 1, price: 90.0 },
+        ],
+      },
     ],
   };
 }

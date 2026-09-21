@@ -10,6 +10,7 @@ const NAV_SECTIONS = [
       { to: "/owner", icon: "📊", label: "Dashboard", end: true },
       { to: "/owner/transactions", icon: "📋", label: "Transactions" },
       { to: "/owner/inventory", icon: "📦", label: "Inventory" },
+      { to: "/owner/menu", icon: "🍜", label: "Menu" },
     ],
   },
   {

@@ -120,6 +120,34 @@ export async function getMenuCategories() {
   return categoriesCache.map((c) => ({ ...c, itemCount: MENU_ITEMS[c.key]?.length || 0 }));
 }
 
+const CATEGORY_ACCENTS = ["#c0392b", "#6b46a3", "#a5308c", "#8a6d1f", "#3f5f52", "#1e6b47", "#a5301f", "#5c3e99"];
+
+// Real version later: POST /api/menu-categories  { name, icon }
+export async function createMenuCategory({ name, icon }) {
+  await getMenuCategories(); // makes sure categoriesCache is loaded
+  await new Promise((r) => setTimeout(r, 150));
+
+  const cleanName = String(name || "").trim();
+  if (!cleanName) throw new Error("Category name is required.");
+
+  const key = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const exists =
+    !key ||
+    MENU_ITEMS[key] ||
+    categoriesCache.some((c) => c.name.toLowerCase() === cleanName.toLowerCase());
+  if (exists) throw new Error(`Category "${cleanName}" already exists.`);
+
+  const category = {
+    key,
+    name: cleanName,
+    icon: String(icon || "").trim() || "🍽️",
+    accent: CATEGORY_ACCENTS[categoriesCache.length % CATEGORY_ACCENTS.length],
+  };
+  categoriesCache = [...categoriesCache, category];
+  MENU_ITEMS[key] = [];
+  return { ...category, itemCount: 0 };
+}
+
 const MENU_ITEMS = {
   starters: [
     { id: "st-1", name: "Lumpiang Shanghai", price: 90 },
@@ -165,4 +193,65 @@ export async function getMenuItems(categoryKey) {
   // Real version later: return apiFetch(`/api/menu-items?category=${categoryKey}`);
   await new Promise((r) => setTimeout(r, 150));
   return MENU_ITEMS[categoryKey] || [];
+}
+
+// ---------------- Menu CRUD (Owner → Menu tab) ----------------
+// Real versions later:
+//   getAllMenuItems -> GET    /api/menu-items
+//   createMenuItem  -> POST   /api/menu-items
+//   updateMenuItem  -> PUT    /api/menu-items/:id
+//   deleteMenuItem  -> DELETE /api/menu-items/:id
+// Mock changes live in memory only, so they reset when the page is refreshed.
+
+function validateMenuInput({ name, price, categoryKey }, ignoreId = null) {
+  const cleanName = String(name || "").trim();
+  const cleanPrice = Number(price);
+  if (!cleanName) throw new Error("Item name is required.");
+  if (!categoryKey || !MENU_ITEMS[categoryKey]) throw new Error("Please choose a category.");
+  if (!Number.isFinite(cleanPrice) || cleanPrice <= 0) throw new Error("Price must be greater than 0.");
+  const duplicate = MENU_ITEMS[categoryKey].some(
+    (i) => i.id !== ignoreId && i.name.toLowerCase() === cleanName.toLowerCase()
+  );
+  if (duplicate) throw new Error(`"${cleanName}" already exists in this category.`);
+  return { name: cleanName, price: cleanPrice, categoryKey };
+}
+
+export async function getAllMenuItems() {
+  await new Promise((r) => setTimeout(r, 150));
+  return Object.entries(MENU_ITEMS).flatMap(([categoryKey, list]) =>
+    list.map((item) => ({ ...item, categoryKey }))
+  );
+}
+
+export async function createMenuItem(input) {
+  await new Promise((r) => setTimeout(r, 150));
+  const { name, price, categoryKey } = validateMenuInput(input);
+  const prefix = MENU_ITEMS[categoryKey][0]?.id.split("-")[0] || categoryKey.slice(0, 2);
+  const item = { id: `${prefix}-${Date.now()}`, name, price };
+  MENU_ITEMS[categoryKey] = [...MENU_ITEMS[categoryKey], item];
+  return { ...item, categoryKey };
+}
+
+export async function updateMenuItem(id, input) {
+  await new Promise((r) => setTimeout(r, 150));
+  const { name, price, categoryKey } = validateMenuInput(input, id);
+  // Find where the item currently lives (it may be moving to another category).
+  const oldKey = Object.keys(MENU_ITEMS).find((k) => MENU_ITEMS[k].some((i) => i.id === id));
+  if (!oldKey) throw new Error("Item not found.");
+  const updated = { id, name, price };
+  if (oldKey === categoryKey) {
+    MENU_ITEMS[categoryKey] = MENU_ITEMS[categoryKey].map((i) => (i.id === id ? updated : i));
+  } else {
+    MENU_ITEMS[oldKey] = MENU_ITEMS[oldKey].filter((i) => i.id !== id);
+    MENU_ITEMS[categoryKey] = [...MENU_ITEMS[categoryKey], updated];
+  }
+  return { ...updated, categoryKey };
+}
+
+export async function deleteMenuItem(id) {
+  await new Promise((r) => setTimeout(r, 150));
+  const key = Object.keys(MENU_ITEMS).find((k) => MENU_ITEMS[k].some((i) => i.id === id));
+  if (!key) throw new Error("Item not found.");
+  MENU_ITEMS[key] = MENU_ITEMS[key].filter((i) => i.id !== id);
+  return { id };
 }
