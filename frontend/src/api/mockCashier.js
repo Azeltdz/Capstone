@@ -22,9 +22,9 @@ export async function getOrderTypes() {
   return orderTypesCache;
 }
 
-// Status values match the filter tabs on the Orders screen: "In Progress",
-// "Ready", "Completed". "Card" was removed as a mock payment value since
-// the app now only offers Cash / GCash (see CartPanel.jsx).
+// Status values: "In Progress", "Ready", "Completed". "Card" was removed as
+// a mock payment value since the app now only offers Cash / GCash
+// (see CartPanel.jsx).
 const MOCK_ORDERS = [
   { id: "#TXN-0247", time: "11:42 AM", type: "Dine-in", orderLabel: "#247 / Dine-in", items: "Lomi Special ×2, Chopsuey ×1", itemCount: 3, total: 270.0, payment: "GCash", customer: "Juan Dela Cruz", status: "Ready" },
   { id: "#TXN-0246", time: "11:35 AM", type: "Delivery", orderLabel: "#246 / Delivery", items: "Lechon Chami ×2, Tapsilog ×1", itemCount: 3, total: 320.0, payment: "Cash", customer: "Maria Santos", status: "In Progress" },
@@ -48,12 +48,28 @@ function initialsFor(name) {
     .toUpperCase();
 }
 
-export async function fetchOrders({ status = "all" } = {}) {
+// Filters: status, type, payment ("all" = no filter) and search (customer name,
+// case-insensitive, matches from the first letter: "j" -> Juan, Jose; "ju" -> Juan). The real endpoint should accept the same four params.
+export async function fetchOrders({
+  status = "all",
+  type = "all",
+  payment = "all",
+  search = "",
+} = {}) {
   // Real version later:
-  //   const params = new URLSearchParams({ branch: user.branchId, status });
+  //   const params = new URLSearchParams({ branch: user.branchId, status, type, payment, search });
   //   return apiFetch(`/api/transactions?${params}`);
   await new Promise((r) => setTimeout(r, 200));
-  const filtered = status === "all" ? MOCK_ORDERS : MOCK_ORDERS.filter((o) => o.status === status);
+
+  const term = search.trim().toLowerCase();
+  const filtered = MOCK_ORDERS.filter(
+    (o) =>
+      (status === "all" || o.status === status) &&
+      (type === "all" || o.type === type) &&
+      (payment === "all" || o.payment === payment) &&
+      (term === "" || o.customer.toLowerCase().startsWith(term))
+  );
+
   const withDisplayFields = filtered.map((o) => ({
     ...o,
     initials: initialsFor(o.customer),

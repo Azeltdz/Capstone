@@ -638,6 +638,32 @@ td.align-right {
   color: var(--red);
 }
 
+.orders-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.type-select {
+  height: 40px;
+  padding: 0 70px 0 20px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background-color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%23666' stroke-width='1.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.type-select:focus {
+  outline: none;
+  border-color: #888;
+}
+
+
 /* ===== Badges ===== */
 .badge {
   display: inline-block;
@@ -1697,6 +1723,118 @@ td.align-right {
   font-weight: 700;
 }
 
+/* View button (bottom of each order card) */
+.order-card-view {
+  width: 100%;
+  margin-top: 12px;
+  height: 38px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.order-card-view:hover { background: #f5f5f5; }
+.order-card-view:focus-visible,
+.modal-close:focus-visible,
+.modal-done:focus-visible { outline: 2px solid #333; outline-offset: 2px; }
+
+/* Centered popup */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.modal-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+}
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-title { margin: 0; font-size: 18px; }
+.modal-subtitle { font-size: 13px; color: #777; }
+.modal-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: #f0f0f0;
+  cursor: pointer;
+}
+.modal-customer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin: 0 0 16px;
+}
+.modal-grid dt { font-size: 12px; color: #777; margin-bottom: 2px; }
+.modal-grid dd { margin: 0; font-size: 14px; }
+.modal-muted { color: #777; }
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.status-dot.dot-green { background: #2e9e5b; }
+.status-dot.dot-orange { background: #e08a1e; }
+.status-dot.dot-blue { background: #2f6fd6; }
+
+.modal-items {
+  border: 1px solid #eee;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.modal-items-head,
+.modal-items-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+.modal-items-head { background: #fafafa; color: #777; font-size: 12px; }
+.modal-items-row + .modal-items-row { border-top: 1px solid #f0f0f0; }
+
+.modal-total {
+  display: flex;
+  justify-content: space-between;
+  margin: 14px 0;
+  font-weight: 700;
+}
+.modal-done {
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: #222;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* ===== Cashier: Orders view (card grid) ===== */
 .status-tabs {
   display: flex;
@@ -1798,18 +1936,6 @@ td.align-right {
   color: var(--text-secondary);
   white-space: nowrap;
 }
-
-.status-dot-sm {
-  width: 0.4375rem;
-  height: 0.4375rem;
-  border-radius: 50%;
-  display: inline-block;
-  font-style: normal;
-}
-
-.status-dot-sm.dot-green { background: #34a853; }
-.status-dot-sm.dot-orange { background: #e08a1e; }
-.status-dot-sm.dot-blue { background: #4a90d9; }
 
 .order-card-meta {
   display: flex;
