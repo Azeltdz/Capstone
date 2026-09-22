@@ -63,7 +63,7 @@ export async function getTransactionsData() {
       { day: "Thu", poblacion: 78, sanRoque: 38 },
       { day: "Fri", poblacion: 85, sanRoque: 40 },
       { day: "Sat", poblacion: 88, sanRoque: 42 },
-      { day: "Sun(est)", poblacion: 65, sanRoque: 30, projected: true },
+      { day: "Sun", poblacion: 65, sanRoque: 30 },
     ],
     rows: [
       {

@@ -1,5 +1,5 @@
 // src/pages/owner/MenuView.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   getMenuCategories,
   getAllMenuItems,
@@ -11,39 +11,69 @@ import {
 
 const EMPTY_FORM = { name: "", price: "", categoryKey: "" };
 const NEW_CATEGORY = "__new__"; // special <select> value for "+ New category…"
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 
 export default function MenuView() {
   const [categories, setCategories] = useState(null);
-  const [items, setItems] = useState(null);
+  const [items, setItems] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [editing, setEditing] = useState(null); // null = closed, "new" = adding, or the item being edited
+  const [deleting, setDeleting] = useState(null); // null = closed, or the item pending delete confirmation
   const [form, setForm] = useState(EMPTY_FORM);
   const [isNewCategory, setIsNewCategory] = useState(false);
   const [newCategory, setNewCategory] = useState({ name: "", icon: "" });
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function load() {
+  useEffect(() => {
+    getMenuCategories()
+      .then(setCategories)
+      .catch((err) => setError(err.message));
+  }, []);
+
+  // Ignore responses that land after a newer request was already sent
+  // (e.g. filter changed twice in quick succession).
+  const requestId = useRef(0);
+  const load = useCallback(async () => {
+    const myId = ++requestId.current;
+    setLoading(true);
     try {
-      const [cats, all] = await Promise.all([getMenuCategories(), getAllMenuItems()]);
-      setCategories(cats);
-      setItems(all);
+      const data = await getAllMenuItems({ page, pageSize, categoryKey: filter, search });
+      if (myId !== requestId.current) return;
+      setItems(data.items);
+      setTotalCount(data.totalCount);
+      setTotalPages(data.totalPages);
+      if (data.page !== page) setPage(data.page); // clamp if filtering emptied the current page
       setError("");
     } catch (err) {
+      if (myId !== requestId.current) return;
       setError(err.message);
+    } finally {
+      if (myId === requestId.current) setLoading(false);
     }
-  }
+  }, [page, pageSize, filter, search]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  async function reloadAfterMutation() {
+    const cats = await getMenuCategories();
+    setCategories(cats);
+    await load();
+  }
 
   function openAdd() {
-    setForm({ ...EMPTY_FORM, categoryKey: filter !== "all" ? filter : categories[0]?.key || "" });
+    setForm({ ...EMPTY_FORM, categoryKey: filter !== "all" ? filter : categories?.[0]?.key || "" });
     setIsNewCategory(false);
     setNewCategory({ name: "", icon: "" });
     setFormError("");
@@ -58,7 +88,7 @@ export default function MenuView() {
     setEditing(item);
   }
 
-  function closeModal() {
+  function closeEditor() {
     if (!saving) setEditing(null);
   }
 
@@ -72,20 +102,16 @@ export default function MenuView() {
       if (isNewCategory) {
         const cat = await createMenuCategory(newCategory);
         categoryKey = cat.key;
-        // Point the form at the new category right away. If saving the item
-        // fails below (e.g. empty name), the user can fix it and retry
-        // without hitting "category already exists".
         setForm((f) => ({ ...f, categoryKey }));
         setIsNewCategory(false);
-        await load();
       }
 
       const payload = { ...form, categoryKey };
       if (editing === "new") await createMenuItem(payload);
       else await updateMenuItem(editing.id, payload);
 
-      await load();
       setEditing(null);
+      await reloadAfterMutation();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -93,24 +119,35 @@ export default function MenuView() {
     }
   }
 
-  async function handleDelete(item) {
-    if (!window.confirm(`Delete "${item.name}" from the menu?`)) return;
+  function closeDelete() {
+    if (!saving) setDeleting(null);
+  }
+
+  async function handleConfirmDelete() {
+    setSaving(true);
+    setFormError("");
     try {
-      await deleteMenuItem(item.id);
-      await load();
+      await deleteMenuItem(deleting.id);
+      setDeleting(null);
+      await reloadAfterMutation();
     } catch (err) {
-      setError(err.message);
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
     }
   }
 
-  if (error && !items) return <p className="error-text">Couldn't load menu. {error}</p>;
-  if (!items || !categories) return <p className="loading-text">Loading menu…</p>;
+  if (error && items.length === 0 && !loading) {
+    return (
+      <div className="panel">
+        <p className="error-text">Couldn't load menu. {error}</p>
+      </div>
+    );
+  }
 
-  const categoryName = Object.fromEntries(categories.map((c) => [c.key, c.name]));
-  const term = search.trim().toLowerCase();
-  const visible = items.filter(
-    (i) => (filter === "all" || i.categoryKey === filter) && (term === "" || i.name.toLowerCase().includes(term))
-  );
+  const categoryName = Object.fromEntries((categories || []).map((c) => [c.key, c.name]));
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, totalCount);
 
   return (
     <div className="panel">
@@ -122,17 +159,27 @@ export default function MenuView() {
             type="text"
             placeholder="Search item…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
-          <select className="menu-input" value={filter} onChange={(e) => setFilter(e.target.value)}>
+          <select
+            className="menu-input"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="all">All categories</option>
-            {categories.map((c) => (
+            {(categories || []).map((c) => (
               <option key={c.key} value={c.key}>
                 {c.icon} {c.name} ({c.itemCount})
               </option>
             ))}
           </select>
-          <button className="menu-btn menu-btn-primary" onClick={openAdd}>
+          <button className="menu-btn menu-btn-primary" onClick={openAdd} disabled={!categories}>
             + Add Item
           </button>
         </div>
@@ -151,34 +198,90 @@ export default function MenuView() {
             </tr>
           </thead>
           <tbody>
-            {visible.map((item) => (
-              <tr key={item.id}>
-                <td>{item.name}</td>
-                <td>{categoryName[item.categoryKey]}</td>
-                <td>₱{item.price.toFixed(2)}</td>
-                <td className="menu-actions-col">
-                  <button className="menu-btn" onClick={() => openEdit(item)}>
-                    Edit
-                  </button>
-                  <button className="menu-btn menu-btn-danger" onClick={() => handleDelete(item)}>
-                    Delete
-                  </button>
+            {loading && (
+              <tr>
+                <td colSpan={4} className="loading-text">
+                  Loading…
                 </td>
               </tr>
-            ))}
-            {visible.length === 0 && (
+            )}
+            {!loading && items.length === 0 && (
               <tr>
                 <td colSpan={4} className="loading-text">
                   No menu items found.
                 </td>
               </tr>
             )}
+            {!loading &&
+              items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.name}</td>
+                  <td>{categoryName[item.categoryKey]}</td>
+                  <td>₱{item.price.toFixed(2)}</td>
+                  <td className="menu-actions-col">
+                    <button className="menu-btn" onClick={() => openEdit(item)}>
+                      Edit
+                    </button>
+                    <button
+                      className="menu-btn menu-btn-danger"
+                      onClick={() => {
+                        setFormError("");
+                        setDeleting(item);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
 
+      {totalCount > 0 && (
+        <div className="menu-pagination">
+          <div className="menu-pagination-info">
+            <span>
+              Showing {rangeStart}–{rangeEnd} of {totalCount}
+            </span>
+            <select
+              className="menu-input"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="menu-pagination-controls">
+            <button className="menu-btn" disabled={page <= 1} onClick={() => setPage(1)}>
+              First
+            </button>
+            <button className="menu-btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Prev
+            </button>
+            <span className="menu-pagination-page">
+              Page {page} of {totalPages}
+            </span>
+            <button className="menu-btn" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </button>
+            <button className="menu-btn" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+              Last
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit modal */}
       {editing && (
-        <div className="menu-backdrop" onClick={closeModal}>
+        <div className="menu-backdrop" onClick={closeEditor}>
           <form className="menu-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSave}>
             <h3 className="panel-title">{editing === "new" ? "Add Menu Item" : "Edit Menu Item"}</h3>
 
@@ -206,7 +309,7 @@ export default function MenuView() {
                   }
                 }}
               >
-                {categories.map((c) => (
+                {(categories || []).map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.name}
                   </option>
@@ -256,7 +359,7 @@ export default function MenuView() {
             {formError && <p className="error-text">{formError}</p>}
 
             <div className="menu-modal-actions">
-              <button type="button" className="menu-btn" onClick={closeModal} disabled={saving}>
+              <button type="button" className="menu-btn" onClick={closeEditor} disabled={saving}>
                 Cancel
               </button>
               <button type="submit" className="menu-btn menu-btn-primary" disabled={saving}>
@@ -264,6 +367,27 @@ export default function MenuView() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleting && (
+        <div className="menu-backdrop" onClick={closeDelete}>
+          <div className="menu-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="panel-title">Delete menu item?</h3>
+            <p>
+              <strong>{deleting.name}</strong> will be removed from the menu and the cashier POS. This can't be undone.
+            </p>
+            {formError && <p className="error-text">{formError}</p>}
+            <div className="menu-modal-actions">
+              <button className="menu-btn" onClick={closeDelete} disabled={saving}>
+                Cancel
+              </button>
+              <button className="menu-btn menu-btn-danger" onClick={handleConfirmDelete} disabled={saving}>
+                {saving ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -216,11 +216,25 @@ function validateMenuInput({ name, price, categoryKey }, ignoreId = null) {
   return { name: cleanName, price: cleanPrice, categoryKey };
 }
 
-export async function getAllMenuItems() {
+// Now supports server-side-style filtering + pagination, since a real menu
+// can have thousands of rows. Returns { items, totalCount, totalPages, page }.
+export async function getAllMenuItems({ page = 1, pageSize = 10, categoryKey = "all", search = "" } = {}) {
   await new Promise((r) => setTimeout(r, 150));
-  return Object.entries(MENU_ITEMS).flatMap(([categoryKey, list]) =>
-    list.map((item) => ({ ...item, categoryKey }))
+  const term = search.trim().toLowerCase();
+
+  const all = Object.entries(MENU_ITEMS).flatMap(([key, list]) =>
+    list.map((item) => ({ ...item, categoryKey: key }))
   );
+  const filtered = all.filter(
+    (i) => (categoryKey === "all" || i.categoryKey === categoryKey) && (term === "" || i.name.toLowerCase().includes(term))
+  );
+
+  const totalCount = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+
+  return { items: filtered.slice(start, start + pageSize), totalCount, totalPages, page: safePage };
 }
 
 export async function createMenuItem(input) {
