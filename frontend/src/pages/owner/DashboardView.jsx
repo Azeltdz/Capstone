@@ -9,7 +9,7 @@ import {
   Tooltip,
   Title,
 } from "chart.js";
-import { BarChart3, Trophy, Sparkles, Clock } from "lucide-react";
+import { BarChart3, Trophy, Sparkles, Clock, X } from "lucide-react";
 import StatCard from "../../components/StatCard";
 import { getDashboardData } from "../../api/mockOwner";
 
@@ -27,6 +27,9 @@ const COLORS = {
 };
 
 const BRANCH_COLORS = [COLORS.navy, COLORS.blue, COLORS.purple, COLORS.orange];
+// Appends alpha (in hex) to a 6-digit hex color, used to fade out
+// non-selected bars once a branch is picked.
+const withAlpha = (hex, alpha) => `${hex}${alpha}`;
 
 const tooltipStyle = {
   backgroundColor: "#ffffff",
@@ -54,8 +57,6 @@ const responsiveBase = {
   animation: false,
 };
 
-// Skeleton placeholder shown while the dashboard is loading — replaces the
-// plain "Loading dashboard…" text with shapes that mirror the real layout.
 function DashboardSkeleton() {
   return (
     <>
@@ -94,6 +95,8 @@ export default function DashboardView() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Branch selected by clicking a bar in the Sales chart. null = no filter.
+  const [selectedBranch, setSelectedBranch] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +122,11 @@ export default function DashboardView() {
           {
             label: "Sales",
             data: branches.map((b) => b.sales),
-            backgroundColor: branches.map((_, i) => BRANCH_COLORS[i % BRANCH_COLORS.length]),
+            backgroundColor: branches.map((b, i) => {
+              const base = BRANCH_COLORS[i % BRANCH_COLORS.length];
+              if (!selectedBranch) return base;
+              return b.branch === selectedBranch ? base : withAlpha(base, "33");
+            }),
             borderRadius: 8,
             maxBarThickness: 64,
           },
@@ -127,6 +134,16 @@ export default function DashboardView() {
       },
       options: {
         ...responsiveBase,
+        onHover: (event, elements) => {
+          event.native.target.style.cursor = elements.length ? "pointer" : "default";
+        },
+        // Clicking a bar sets the filter; clicking the already-selected
+        // bar again clears it.
+        onClick: (event, elements) => {
+          if (!elements.length) return;
+          const clicked = branches[elements[0].index].branch;
+          setSelectedBranch((prev) => (prev === clicked ? null : clicked));
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -147,12 +164,16 @@ export default function DashboardView() {
         },
       },
     };
-  }, [data]);
+  }, [data, selectedBranch]);
 
+  // Items are shown if they don't carry a branch tag at all (so this still
+  // works with your current mock data), or if their branch matches the
+  // selected filter.
   const sortedTopItems = useMemo(() => {
     if (!data) return [];
-    return [...data.topItems].sort((a, b) => b.sold - a.sold).slice(0, 20);
-  }, [data]);
+    const inBranch = (item) => !selectedBranch || !item.branch || item.branch === selectedBranch;
+    return [...data.topItems].filter(inBranch).sort((a, b) => b.sold - a.sold).slice(0, 20);
+  }, [data, selectedBranch]);
 
   const topItemsChart = useMemo(() => {
     if (!sortedTopItems.length) return null;
@@ -203,6 +224,14 @@ export default function DashboardView() {
   const { stats, branchStatus, aiRecommendations } = data;
   const topSeller = sortedTopItems[0];
 
+  const visibleBranchStatus = selectedBranch
+    ? branchStatus.filter((b) => b.name === selectedBranch)
+    : branchStatus;
+
+  const visibleAiRecommendations = selectedBranch
+    ? aiRecommendations.filter((r) => !r.branch || r.branch === selectedBranch)
+    : aiRecommendations;
+
   return (
     <>
       <div className="dashboard-meta">
@@ -222,10 +251,19 @@ export default function DashboardView() {
 
       <div className="dash-grid">
         <div className="panel panel-modern panel-accent-navy">
-          <h3 className="panel-title panel-title-icon">
-            <BarChart3 size={18} color={COLORS.navy} />
-            Sales by Branch — Today
-          </h3>
+          <div className="panel-header-row">
+            <h3 className="panel-title panel-title-icon">
+              <BarChart3 size={18} color={COLORS.navy} />
+              Sales by Branch — Today
+            </h3>
+            {selectedBranch && (
+              <button className="filter-chip" onClick={() => setSelectedBranch(null)}>
+                {selectedBranch}
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <p className="panel-sub">Click a bar to filter the dashboard by branch</p>
           <div className="chart-box">
             <Bar data={salesChart.data} options={salesChart.options} />
           </div>
@@ -236,9 +274,15 @@ export default function DashboardView() {
             <Trophy size={18} color={COLORS.green} />
             Top Menu Items Today
           </h3>
-          <div className="chart-box">
-            <Bar data={topItemsChart.data} options={topItemsChart.options} />
-          </div>
+          {topItemsChart ? (
+            <div className="chart-box">
+              <Bar data={topItemsChart.data} options={topItemsChart.options} />
+            </div>
+          ) : (
+            <p className="panel-sub" style={{ margin: "1rem 0" }}>
+              No items recorded for {selectedBranch} today.
+            </p>
+          )}
           {topSeller && (
             <div className="best-seller-note">
               <Trophy size={14} />
@@ -251,7 +295,7 @@ export default function DashboardView() {
 
         <div className="panel panel-modern panel-accent-blue">
           <h3 className="panel-title">Branch Status</h3>
-          {branchStatus.map((b) => (
+          {visibleBranchStatus.map((b) => (
             <div className="branch-status-row" key={b.name}>
               <span className={`status-dot-lg ${b.dotClass}`} />
               <span className="branch-name">{b.name}</span>
@@ -267,7 +311,7 @@ export default function DashboardView() {
             AI Recommendations
           </h3>
           <ul className="ai-list">
-            {aiRecommendations.map((r, i) => (
+            {visibleAiRecommendations.map((r, i) => (
               <li key={i} className={r.warn ? "ai-warn" : ""}>
                 {r.text}
               </li>
