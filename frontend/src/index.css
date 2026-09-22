@@ -2303,8 +2303,16 @@ td.align-right {
   justify-content: space-between;
   margin-bottom: 14px;
 }
-.modal-title { margin: 0; font-size: 18px; }
-.modal-subtitle { font-size: 13px; color: #777; }
+.modal-title { 
+  margin: 0; 
+  font-size: 18px; 
+}
+
+.modal-subtitle { 
+  font-size: 13px; 
+  color: #777; 
+}
+
 .modal-close {
   width: 32px;
   height: 32px;
@@ -2404,6 +2412,35 @@ td.align-right {
   gap: 6px;
 }
 .empty-icon { font-size: 28px; }
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.form-row input,
+.form-row select {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  outline: none;
+  border-color: #1c2b4a;
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
 
 /* Pagination */
 .table-pagination {

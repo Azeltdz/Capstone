@@ -2,21 +2,31 @@
 import { useEffect, useState } from "react";
 import {
   getSettingsData,
+  getDefaultSettings,
   updateAnalyticsSettings,
   updateReceiptSettings,
   updateInventoryAlertSettings,
-  updateBranchTableCount,
 } from "../../api/mockOwner";
 
 const SAVE_STATUS = { IDLE: "idle", SAVING: "saving", SAVED: "saved", ERROR: "error" };
 
+// One entry here per editable panel. `section` is the key both in
+// `settings` state and in the object getDefaultSettings() returns, so
+// wiring a new settings panel later is just adding a row to this array —
+// the save/restore handlers, buttons, and status tracking are all generic.
+const SETTINGS_PANELS = [
+  { section: "analytics", updateFn: updateAnalyticsSettings, saveLabel: "Save Analytics Settings" },
+  { section: "receipt", updateFn: updateReceiptSettings, saveLabel: "Save Receipt Settings" },
+  { section: "inventoryAlerts", updateFn: updateInventoryAlertSettings, saveLabel: "Save Alert Settings" },
+];
+
 export default function SettingsView() {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState("");
-  // One entry per panel: { [panelKey]: { status, message } }. Kept separate
-  // from `settings` so a failed save on one panel never blocks or clears
-  // the others.
-  const [saveStatus, setSaveStatus] = useState({});
+  // One entry per panel/action: { "analytics-save": {status}, "analytics-restore": {status}, ... }
+  // Save and Restore get separate keys so clicking one doesn't show a
+  // "Saving…" state on the other button.
+  const [actionStatus, setActionStatus] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -35,76 +45,88 @@ export default function SettingsView() {
     setSettings((prev) => ({ ...prev, [section]: { ...prev[section], [field]: value } }));
   }
 
-  function updateBranchTableField(branchId, value) {
-    setSettings((prev) => ({
-      ...prev,
-      branchTables: prev.branchTables.map((b) => (b.id === branchId ? { ...b, tableCount: value } : b)),
-    }));
-  }
-
-  // Shared saving/saved/error lifecycle for every panel, so each save
-  // handler below is just "what to send", not "how to track it".
-  async function runSave(panelKey, saveFn) {
-    setSaveStatus((prev) => ({ ...prev, [panelKey]: { status: SAVE_STATUS.SAVING } }));
+  // Shared saving/saved/error lifecycle for both Save and Restore buttons.
+  async function runAction(actionKey, fn) {
+    setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.SAVING } }));
     try {
-      await saveFn();
-      setSaveStatus((prev) => ({ ...prev, [panelKey]: { status: SAVE_STATUS.SAVED } }));
+      await fn();
+      setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.SAVED } }));
       setTimeout(() => {
-        setSaveStatus((prev) => ({ ...prev, [panelKey]: { status: SAVE_STATUS.IDLE } }));
+        setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.IDLE } }));
       }, 2000);
     } catch (err) {
-      setSaveStatus((prev) => ({ ...prev, [panelKey]: { status: SAVE_STATUS.ERROR, message: err.message } }));
+      setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.ERROR, message: err.message } }));
     }
   }
 
-  function handleSaveAnalytics() {
-    runSave("analytics", async () => {
-      const saved = await updateAnalyticsSettings({
-        movingAvgWindow: Number(settings.analytics.movingAvgWindow),
-        trendThreshold: Number(settings.analytics.trendThreshold),
-        anomalyThreshold: Number(settings.analytics.anomalyThreshold),
-      });
-      setSettings((prev) => ({ ...prev, analytics: saved }));
+  function handleSave(panel) {
+    const { section, updateFn } = panel;
+    runAction(`${section}-save`, async () => {
+      const payload =
+        section === "analytics"
+          ? {
+              movingAvgWindow: Number(settings.analytics.movingAvgWindow),
+              trendThreshold: Number(settings.analytics.trendThreshold),
+              anomalyThreshold: Number(settings.analytics.anomalyThreshold),
+            }
+          : settings[section];
+      const saved = await updateFn(payload);
+      setSettings((prev) => ({ ...prev, [section]: saved }));
     });
   }
 
-  function handleSaveReceipt() {
-    runSave("receipt", async () => {
-      const saved = await updateReceiptSettings(settings.receipt);
-      setSettings((prev) => ({ ...prev, receipt: saved }));
+  function handleRestore(panel) {
+    const { section, updateFn } = panel;
+    runAction(`${section}-restore`, async () => {
+      const defaults = await getDefaultSettings();
+      const saved = await updateFn(defaults[section]);
+      setSettings((prev) => ({ ...prev, [section]: saved }));
     });
   }
 
-  function handleSaveInventoryAlerts() {
-    runSave("inventoryAlerts", async () => {
-      const saved = await updateInventoryAlertSettings(settings.inventoryAlerts);
-      setSettings((prev) => ({ ...prev, inventoryAlerts: saved }));
-    });
-  }
-
-  function handleSaveTableCounts() {
-    runSave("tables", async () => {
-      // Each branch's table count is its own row, so save them in parallel
-      // rather than inventing a bulk-update endpoint just for this panel.
-      const updated = await Promise.all(
-        settings.branchTables.map((b) => updateBranchTableCount(b.id, b.tableCount))
-      );
-      setSettings((prev) => ({
-        ...prev,
-        branchTables: updated.map(({ id, name, tableCount }) => ({ id, name, tableCount })),
-      }));
-    });
-  }
-
-  function saveLabel(panelKey, defaultLabel) {
-    const status = saveStatus[panelKey]?.status;
+  function actionLabel(actionKey, defaultLabel) {
+    const status = actionStatus[actionKey]?.status;
     if (status === SAVE_STATUS.SAVING) return "Saving…";
     if (status === SAVE_STATUS.SAVED) return "Saved ✓";
     return defaultLabel;
   }
 
-  function isSaving(panelKey) {
-    return saveStatus[panelKey]?.status === SAVE_STATUS.SAVING;
+  function isBusy(actionKey) {
+    return actionStatus[actionKey]?.status === SAVE_STATUS.SAVING;
+  }
+
+  // Renders the Save + Restore Defaults row and any error message for a
+  // panel, shared by every settings box below so each one stays in sync.
+  function PanelActions({ panel }) {
+    const saveKey = `${panel.section}-save`;
+    const restoreKey = `${panel.section}-restore`;
+    const err =
+      actionStatus[saveKey]?.status === SAVE_STATUS.ERROR
+        ? actionStatus[saveKey].message
+        : actionStatus[restoreKey]?.status === SAVE_STATUS.ERROR
+        ? actionStatus[restoreKey].message
+        : null;
+    return (
+      <>
+        {err && <p className="error-text">{err}</p>}
+        <div className="settings-actions" style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-navy btn-block"
+            onClick={() => handleSave(panel)}
+            disabled={isBusy(saveKey) || isBusy(restoreKey)}
+          >
+            {actionLabel(saveKey, panel.saveLabel)}
+          </button>
+          <button
+            className="btn btn-block"
+            onClick={() => handleRestore(panel)}
+            disabled={isBusy(saveKey) || isBusy(restoreKey)}
+          >
+            {actionLabel(restoreKey, "Restore Defaults")}
+          </button>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -139,12 +161,7 @@ export default function SettingsView() {
         />
         <p className="form-hint">Flag branch if transactions drop more than {settings.analytics.anomalyThreshold}% vs avg</p>
 
-        {saveStatus.analytics?.status === SAVE_STATUS.ERROR && (
-          <p className="error-text">{saveStatus.analytics.message}</p>
-        )}
-        <button className="btn btn-navy btn-block" onClick={handleSaveAnalytics} disabled={isSaving("analytics")}>
-          {saveLabel("analytics", "Save Analytics Settings")}
-        </button>
+        <PanelActions panel={SETTINGS_PANELS[0]} />
       </div>
 
       <div className="panel">
@@ -174,12 +191,7 @@ export default function SettingsView() {
           onChange={(e) => updateField("receipt", "footer", e.target.value)}
         />
 
-        {saveStatus.receipt?.status === SAVE_STATUS.ERROR && (
-          <p className="error-text">{saveStatus.receipt.message}</p>
-        )}
-        <button className="btn btn-navy btn-block" onClick={handleSaveReceipt} disabled={isSaving("receipt")}>
-          {saveLabel("receipt", "Save Receipt Settings")}
-        </button>
+        <PanelActions panel={SETTINGS_PANELS[1]} />
       </div>
 
       <div className="panel">
@@ -202,36 +214,6 @@ export default function SettingsView() {
         </div>
       </div>
 
-      {/* Ch.3 Fig. 23: "...the number of tables per branch used by the POS
-          table selection screen." Table counts live on the branches table
-          itself (see BRANCHES_DB / updateBranchTableCount in mockOwner.js),
-          not in the settings object, but are edited here for convenience —
-          same field the Branch Management tab's "table count" edits. */}
-      <div className="panel">
-        <h3 className="panel-title">🪑 Table Management</h3>
-        <p className="panel-sub">Number of tables per branch, used by the POS table selection screen</p>
-
-        {settings.branchTables.map((branch) => (
-          <div key={branch.id}>
-            <label className="form-label">{branch.name}</label>
-            <input
-              type="number"
-              min="0"
-              className="form-input"
-              value={branch.tableCount}
-              onChange={(e) => updateBranchTableField(branch.id, e.target.value)}
-            />
-          </div>
-        ))}
-
-        {saveStatus.tables?.status === SAVE_STATUS.ERROR && (
-          <p className="error-text">{saveStatus.tables.message}</p>
-        )}
-        <button className="btn btn-navy btn-block" onClick={handleSaveTableCounts} disabled={isSaving("tables")}>
-          {saveLabel("tables", "Save Table Counts")}
-        </button>
-      </div>
-
       <div className="panel">
         <h3 className="panel-title">📦 Inventory Alert Settings</h3>
         <p className="panel-sub">Default reorder thresholds for all ingredients</p>
@@ -252,12 +234,7 @@ export default function SettingsView() {
           onChange={(e) => updateField("inventoryAlerts", "lowStockPcs", e.target.value)}
         />
 
-        {saveStatus.inventoryAlerts?.status === SAVE_STATUS.ERROR && (
-          <p className="error-text">{saveStatus.inventoryAlerts.message}</p>
-        )}
-        <button className="btn btn-navy btn-block" onClick={handleSaveInventoryAlerts} disabled={isSaving("inventoryAlerts")}>
-          {saveLabel("inventoryAlerts", "Save Alert Settings")}
-        </button>
+        <PanelActions panel={SETTINGS_PANELS[2]} />
       </div>
     </div>
   );

@@ -217,14 +217,20 @@ const BRANCH_TXN_HISTORY = {
 // Real version later: this becomes a single-row `settings` table (or a
 // key/value `app_settings` table), fetched once instead of living in
 // memory — same shape, so every caller below stays unchanged.
-let _settingsDB = {
-  analytics: { movingAvgWindow: 7, trendThreshold: 10, anomalyThreshold: 20 },
-  receipt: {
+const DEFAULT_SETTINGS = Object.freeze({
+  analytics: Object.freeze({ movingAvgWindow: 7, trendThreshold: 10, anomalyThreshold: 20 }),
+  receipt: Object.freeze({
     businessName: "Filipee's Bistro",
     tagline: "Sarap ng Batangas Lomi!",
     footer: "Salamat! Bumalik kayo ulit 🍜",
-  },
-  inventoryAlerts: { lowStockKg: "5.0 kg", lowStockPcs: "10 pcs" },
+  }),
+  inventoryAlerts: Object.freeze({ lowStockKg: "5.0 kg", lowStockPcs: "10 pcs" }),
+});
+
+let _settingsDB = {
+  analytics: { ...DEFAULT_SETTINGS.analytics },
+  receipt: { ...DEFAULT_SETTINGS.receipt },
+  inventoryAlerts: { ...DEFAULT_SETTINGS.inventoryAlerts },
 };
 // Note: movingAvgWindow is stored and shown for the owner to edit, but the
 // mock DAILY_SALES/BRANCH_TXN_HISTORY arrays above are fixed at 7 days of
@@ -406,24 +412,153 @@ export async function getAnalyticsData({ itemId = 1, branchId = null } = {}) {
   };
 }
 
-// ---------------- Staff ----------------
+// ================================================================
+// Staff — mutable mock table + full CRUD.
+//
 // Pulled out as its own const (rather than inlined in getStaffData) because
 // the Branches section below needs to derive each branch's staffCount from
 // this same list — mirrors a real `SELECT branch_id, COUNT(*) FROM staff
 // GROUP BY branch_id` query joined into the branches response.
+//
+// Real schema this stands in for:
+//   CREATE TABLE staff_accounts (
+//     username      TEXT PRIMARY KEY,
+//     name          TEXT NOT NULL,
+//     password_hash TEXT NOT NULL,   -- bcrypt, set by the real backend
+//     branch        TEXT NOT NULL,
+//     role          TEXT NOT NULL,   -- 'Admin' | 'Cashier'
+//     status        TEXT NOT NULL    -- 'Active' | 'Inactive'
+//   );
+// ================================================================
+
 const STAFF_ROWS = [
-  { name: "Filipina Sarabia", username: "filipina.owner", branch: "All Branches", role: "Admin", status: "Active", isAdmin: true },
-  { name: "Maria Cruz", username: "maria.c", branch: "Poblacion", role: "Cashier", status: "Active", isAdmin: false },
-  { name: "Jose Reyes", username: "jose.r", branch: "San Roque", role: "Cashier", status: "Active", isAdmin: false },
+  { name: "Filipina Sarabia", username: "filipina.owner", password: "hidden", branch: "All Branches", role: "Admin", status: "Active", isAdmin: true },
+  { name: "Maria Cruz", username: "maria.c", password: "hidden", branch: "Poblacion", role: "Cashier", status: "Active", isAdmin: false },
+  { name: "Jose Reyes", username: "jose.r", password: "hidden", branch: "San Roque", role: "Cashier", status: "Active", isAdmin: false },
 ];
+
+// Never send the password back to the UI — a real API wouldn't either.
+function stripPassword(row) {
+  const { password, ...rest } = row;
+  return rest;
+}
+
+// Computed fresh on every call instead of stored, so "Roles" always
+// reflects STAFF_ROWS (a hardcoded "1 Admin · 6 Cashiers" string would
+// silently drift out of sync the moment a cashier was added/removed).
+function buildStaffStats() {
+  const total = STAFF_ROWS.length;
+  const activeAccounts = STAFF_ROWS.filter((r) => r.status === "Active").length;
+  const adminCount = STAFF_ROWS.filter((r) => r.isAdmin).length;
+  const cashierCount = total - adminCount;
+  return {
+    total,
+    activeAccounts,
+    roles: `${adminCount} Admin · ${cashierCount} Cashier${cashierCount === 1 ? "" : "s"}`,
+  };
+}
 
 export async function getStaffData() {
   // Real version later: return apiFetch("/api/staff");
   await delay();
   return {
-    stats: { total: STAFF_ROWS.length, activeAccounts: STAFF_ROWS.filter((s) => s.status === "Active").length, roles: "1 Admin · 6 Cashiers" },
-    rows: STAFF_ROWS.map((s) => ({ ...s })),
+    stats: buildStaffStats(),
+    rows: STAFF_ROWS.map(stripPassword),
   };
+}
+
+// Branch dropdown options for the Add/Edit Staff popups. Reads live from
+// BRANCHES_DB (declared in the Branches section below — safe to reference
+// here since this only runs when called, same forward-reference pattern as
+// getBranchAnomalies() above) instead of a hardcoded list, so a branch
+// added/renamed/deactivated in Branch Management is instantly correct here
+// too. Deactivated branches are excluded — you can't assign a new cashier
+// to a branch that's been shut down.
+export async function getAssignableBranches() {
+  // Real version later: return apiFetch("/api/branches?assignable=true");
+  await delay(80);
+  return BRANCHES_DB.filter((b) => !b.deactivated).map((b) => b.name);
+}
+
+// CREATE — used by the "Add Staff Account" popup. Always creates a Cashier;
+// the Admin account is seeded once and never created through this form.
+export async function addCashierAccount({ name, username, password, branch }) {
+  // Real version later: return apiFetch("/api/staff", { method: "POST", body: { name, username, password, branch, role: "Cashier" } });
+  await delay();
+
+  const cleanName = name?.trim();
+  const cleanUsername = username?.trim().toLowerCase();
+
+  if (!cleanName || !cleanUsername || !password || !branch) {
+    throw new Error("All fields are required.");
+  }
+  if (password.length < 6) {
+    throw new Error("Password must be at least 6 characters.");
+  }
+  if (STAFF_ROWS.some((r) => r.username.toLowerCase() === cleanUsername)) {
+    throw new Error("That username is already taken.");
+  }
+
+  const newRow = {
+    name: cleanName,
+    username: cleanUsername,
+    password, // real backend hashes this with bcrypt before storing
+    branch,
+    role: "Cashier",
+    status: "Active",
+    isAdmin: false,
+  };
+  STAFF_ROWS.push(newRow);
+  return stripPassword(newRow);
+}
+
+// UPDATE — used by the "Edit" action. Only name/branch are editable here;
+// username and password are left alone (a real form for those would go
+// through separate, more careful endpoints).
+export async function updateStaffAccount(username, { name, branch }) {
+  // Real version later: return apiFetch(`/api/staff/${username}`, { method: "PUT", body: { name, branch } });
+  await delay();
+
+  const row = STAFF_ROWS.find((r) => r.username === username);
+  if (!row) throw new Error("Staff account not found.");
+  if (row.isAdmin) throw new Error("Admin accounts can't be edited here.");
+
+  const cleanName = name?.trim();
+  if (!cleanName || !branch) {
+    throw new Error("Name and branch are required.");
+  }
+
+  row.name = cleanName;
+  row.branch = branch;
+  return stripPassword(row);
+}
+
+// UPDATE (status) — used by the "Deactivate"/"Activate" action.
+export async function toggleStaffStatus(username) {
+  // Real version later: return apiFetch(`/api/staff/${username}/status`, { method: "PATCH" });
+  await delay();
+
+  const row = STAFF_ROWS.find((r) => r.username === username);
+  if (!row) throw new Error("Staff account not found.");
+  if (row.isAdmin) throw new Error("Admin accounts can't be deactivated.");
+
+  row.status = row.status === "Active" ? "Inactive" : "Active";
+  return stripPassword(row);
+}
+
+// DELETE — permanently removes a cashier account. Not wired to a button by
+// default (deactivating preserves transaction history, which is usually
+// what you want for a capstone demo), but available if you need a hard
+// delete for testing.
+export async function deleteStaffAccount(username) {
+  // Real version later: return apiFetch(`/api/staff/${username}`, { method: "DELETE" });
+  await delay();
+
+  const index = STAFF_ROWS.findIndex((r) => r.username === username);
+  if (index === -1) throw new Error("Staff account not found.");
+  if (STAFF_ROWS[index].isAdmin) throw new Error("Admin accounts can't be deleted.");
+
+  STAFF_ROWS.splice(index, 1);
 }
 
 // ================================================================
@@ -435,8 +570,9 @@ export async function getStaffData() {
 // reactivate/delete) that every component calls by name. BranchesView.jsx
 // never touches BRANCHES_DB directly, so swapping this section for real
 // HTTP calls is a one-file change. It is also the ONLY branches list in
-// this file — the AI Analytics section above reads from it too — so there
-// is exactly one place a branch's id, name, or table count can drift.
+// this file — the AI Analytics section above and the Staff section's
+// getAssignableBranches() both read from it too — so there is exactly one
+// place a branch's id, name, or table count can drift.
 //
 // Real schema this stands in for:
 //   CREATE TABLE branches (
@@ -606,6 +742,16 @@ export async function getSettingsData() {
   return {
     ..._settingsDB,
     branchTables: BRANCHES_DB.map(({ id, name, tableCount }) => ({ id, name, tableCount })),
+  };
+}
+
+export async function getDefaultSettings() {
+  // Real version later: return apiFetch("/api/settings/defaults");
+  await delay(80);
+  return {
+    analytics: { ...DEFAULT_SETTINGS.analytics },
+    receipt: { ...DEFAULT_SETTINGS.receipt },
+    inventoryAlerts: { ...DEFAULT_SETTINGS.inventoryAlerts },
   };
 }
 
