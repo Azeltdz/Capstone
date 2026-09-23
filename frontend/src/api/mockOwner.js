@@ -572,7 +572,7 @@ export async function deleteStaffAccount(username) {
 // HTTP calls is a one-file change. It is also the ONLY branches list in
 // this file — the AI Analytics section above and the Staff section's
 // getAssignableBranches() both read from it too — so there is exactly one
-// place a branch's id, name, or table count can drift.
+// place a branch's id or name can drift.
 //
 // Real schema this stands in for:
 //   CREATE TABLE branches (
@@ -580,20 +580,21 @@ export async function deleteStaffAccount(username) {
 //     name TEXT NOT NULL,
 //     location TEXT,
 //     contact TEXT,
-//     table_count INT NOT NULL DEFAULT 0,  -- POS table-selection screen
 //     flagged BOOLEAN DEFAULT FALSE,       -- AI/anomaly flag (low txn volume, etc.)
 //     deactivated BOOLEAN DEFAULT FALSE,   -- must be true before a row can be deleted
 //     sales NUMERIC DEFAULT 0              -- derived from today's transactions in practice
 //   );
-// `staff_count` is NOT a column here — it's a COUNT(*) of staff accounts
-// whose branch_id points at this branch (see getStaffData), so it can never
-// be hand-edited from the branch form. See computeStaffCount() below.
+// `staff_count` and `table_count` are NOT columns here — staff_count is a
+// COUNT(*) of staff accounts (see computeStaffCount below) and table_count
+// is a COUNT(*) of rows in `branch_tables` (see computeTableCount below, in
+// the Branch Tables section further down), so neither can drift out of sync
+// with the records that actually back them.
 // ================================================================
 
 let _branchIdSeq = 3; // next id to hand out — a real DB uses SERIAL/UUID instead
 let BRANCHES_DB = [
-  { id: 1, name: "Poblacion", location: "Bauan, Batangas", sales: 8450, contact: "09XX-XXX-XXXX", tableCount: 8, flagged: false, deactivated: false },
-  { id: 2, name: "San Roque", location: "Bauan, Batangas", sales: 4210, contact: "09XX-XXX-XXXX", tableCount: 6, flagged: true, deactivated: false },
+  { id: 1, name: "Poblacion", location: "Bauan, Batangas", sales: 8450, contact: "09XX-XXX-XXXX", flagged: false, deactivated: false },
+  { id: 2, name: "San Roque", location: "Bauan, Batangas", sales: 4210, contact: "09XX-XXX-XXXX", flagged: true, deactivated: false },
 ];
 
 // Real version later: staffCount comes back already joined from the branches
@@ -603,15 +604,17 @@ function computeStaffCount(branchName) {
   return STAFF_ROWS.filter((s) => s.branch === branchName).length;
 }
 
-// Recomputes the display-only fields (status/tag/staffCount) so callers only
-// ever set the underlying flags (`flagged`, `deactivated`) and these stay in
-// sync — same as a Postgres GENERATED column or a view would do server-side.
+// Recomputes the display-only fields (status/tag/staffCount/tableCount) so
+// callers only ever set the underlying flags (`flagged`, `deactivated`) or
+// mutate BRANCH_TABLES, and everything downstream stays in sync — same as a
+// Postgres GENERATED column or a view would do server-side.
 function deriveBranchDisplayFields(branch) {
   const status = branch.deactivated ? "Deactivated" : branch.flagged ? "Flagged" : "Active";
   const tag = branch.deactivated ? "Deactivated" : branch.flagged ? "⚠ Flag" : "Main";
   return {
     ...branch,
     staffCount: computeStaffCount(branch.name),
+    tableCount: computeTableCount(branch.id),
     status,
     tag,
   };
@@ -632,15 +635,14 @@ export async function createBranch(data) {
   const name = data.name?.trim();
   if (!name) throw new Error("Branch name is required.");
 
-  // staffCount is intentionally not accepted here — a brand-new branch has
-  // no staff accounts assigned to it yet, so it's computed as 0 until staff
-  // are added via Staff Management.
+  // staffCount/tableCount are intentionally not accepted here — a brand-new
+  // branch has no staff accounts or tables yet, so both are computed as 0
+  // until staff are added via Staff Management and tables via Branch Tables.
   const branch = {
     id: _branchIdSeq++,
     name,
     location: data.location?.trim() || "",
     contact: data.contact?.trim() || "",
-    tableCount: Number(data.tableCount) || 0,
     sales: 0,
     flagged: false,
     deactivated: false,
@@ -658,31 +660,14 @@ export async function updateBranch(id, data) {
   const name = data.name?.trim();
   if (!name) throw new Error("Branch name is required.");
 
-  // staffCount is deliberately never taken from `data` — it's derived from
-  // the Staff Management table, not editable on the branch form.
+  // staffCount/tableCount are deliberately never taken from `data` — they're
+  // derived from the Staff and Branch Tables tables, not editable here.
   BRANCHES_DB[idx] = {
     ...BRANCHES_DB[idx],
     name,
     location: data.location?.trim() || "",
     contact: data.contact?.trim() || "",
-    tableCount: data.tableCount !== undefined ? Number(data.tableCount) || 0 : BRANCHES_DB[idx].tableCount,
   };
-  return deriveBranchDisplayFields(BRANCHES_DB[idx]);
-}
-
-// Lighter-weight than updateBranch(): the Settings screen only ever needs to
-// change table counts (it doesn't show location/contact fields), so it gets
-// its own small setter instead of having to assemble a full branch payload
-// just to patch one number.
-export async function updateBranchTableCount(id, tableCount) {
-  // Real version later:
-  // return apiFetch(`/api/branches/${id}/table-count`, { method: "PATCH", body: JSON.stringify({ tableCount }) });
-  await delay();
-  const idx = BRANCHES_DB.findIndex((b) => b.id === id);
-  if (idx === -1) throw new Error("Branch not found.");
-  const n = Number(tableCount);
-  if (!Number.isInteger(n) || n < 0) throw new Error("Table count must be a whole non-negative number.");
-  BRANCHES_DB[idx] = { ...BRANCHES_DB[idx], tableCount: n };
   return deriveBranchDisplayFields(BRANCHES_DB[idx]);
 }
 
@@ -725,23 +710,150 @@ export async function deleteBranch(id) {
     throw new Error("Deactivate this branch before deleting it.");
   }
   BRANCHES_DB.splice(idx, 1);
+  // Also clean up its tables — a real DB would do this with ON DELETE CASCADE.
+  BRANCH_TABLES = BRANCH_TABLES.filter((t) => t.branchId !== id);
+  return { id };
+}
+
+// ================================================================
+// Branch Tables — the physical dine-in tables at each branch (table number
+// + seating/guest capacity), used by the POS "select a table" screen at
+// order time. This is the editable table the owner asked for: every row's
+// Table No. and Guest Capacity can be edited directly, plus adding a
+// brand-new table or removing one.
+//
+// Real schema this stands in for:
+//   CREATE TABLE branch_tables (
+//     id SERIAL PRIMARY KEY,
+//     branch_id INT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+//     table_number INT NOT NULL,
+//     guest_capacity INT NOT NULL,
+//     UNIQUE (branch_id, table_number)
+//   );
+// ================================================================
+
+let _tableIdSeq = 15; // next id to hand out — a real DB uses SERIAL/UUID instead
+let BRANCH_TABLES = [
+  // Poblacion (branchId 1)
+  { id: 1, branchId: 1, tableNumber: 1, guestCapacity: 2 },
+  { id: 2, branchId: 1, tableNumber: 2, guestCapacity: 2 },
+  { id: 3, branchId: 1, tableNumber: 3, guestCapacity: 4 },
+  { id: 4, branchId: 1, tableNumber: 4, guestCapacity: 4 },
+  { id: 5, branchId: 1, tableNumber: 5, guestCapacity: 4 },
+  { id: 6, branchId: 1, tableNumber: 6, guestCapacity: 6 },
+  { id: 7, branchId: 1, tableNumber: 7, guestCapacity: 6 },
+  { id: 8, branchId: 1, tableNumber: 8, guestCapacity: 8 },
+  // San Roque (branchId 2)
+  { id: 9, branchId: 2, tableNumber: 1, guestCapacity: 2 },
+  { id: 10, branchId: 2, tableNumber: 2, guestCapacity: 4 },
+  { id: 11, branchId: 2, tableNumber: 3, guestCapacity: 4 },
+  { id: 12, branchId: 2, tableNumber: 4, guestCapacity: 4 },
+  { id: 13, branchId: 2, tableNumber: 5, guestCapacity: 6 },
+  { id: 14, branchId: 2, tableNumber: 6, guestCapacity: 8 },
+];
+
+// Real version later: tableCount comes back already joined from the
+// branches endpoint (a `table_count` column populated by COUNT(*)...GROUP
+// BY branch_id), so this helper simply disappears once that's true.
+function computeTableCount(branchId) {
+  return BRANCH_TABLES.filter((t) => t.branchId === branchId).length;
+}
+
+function getBranchOr404(branchId) {
+  const branch = BRANCHES_DB.find((b) => b.id === branchId);
+  if (!branch) throw new Error("Branch not found.");
+  return branch;
+}
+
+function validateTableNumber(n) {
+  const num = Number(n);
+  if (!Number.isInteger(num) || num < 1) throw new Error("Table number must be a whole number, 1 or higher.");
+  return num;
+}
+
+function validateGuestCapacity(n) {
+  const num = Number(n);
+  if (!Number.isInteger(num) || num < 1) throw new Error("Guest capacity must be a whole number, 1 or higher.");
+  return num;
+}
+
+// LIST — tables for one branch (default) or every branch when branchId is
+// omitted, sorted by table number so the editable grid renders in order.
+export async function getBranchTables(branchId = null) {
+  // Real version later: return apiFetch(`/api/branches/${branchId}/tables`);
+  await delay();
+  return BRANCH_TABLES.filter((t) => branchId == null || t.branchId === branchId)
+    .map((t) => ({ ...t }))
+    .sort((a, b) => a.branchId - b.branchId || a.tableNumber - b.tableNumber);
+}
+
+// CREATE — "+ Add Table". Defaults tableNumber to one past the branch's
+// current highest table number and guestCapacity to 4 if not given.
+export async function addBranchTable(branchId, { tableNumber, guestCapacity = 4 } = {}) {
+  // Real version later:
+  // return apiFetch(`/api/branches/${branchId}/tables`, { method: "POST", body: JSON.stringify({ tableNumber, guestCapacity }) });
+  await delay();
+  getBranchOr404(branchId);
+
+  const existing = BRANCH_TABLES.filter((t) => t.branchId === branchId);
+  const nextNumber = tableNumber ?? (existing.length ? Math.max(...existing.map((t) => t.tableNumber)) + 1 : 1);
+
+  const num = validateTableNumber(nextNumber);
+  const cap = validateGuestCapacity(guestCapacity);
+  if (existing.some((t) => t.tableNumber === num)) {
+    throw new Error(`Table ${num} already exists for this branch.`);
+  }
+
+  const table = { id: _tableIdSeq++, branchId, tableNumber: num, guestCapacity: cap };
+  BRANCH_TABLES.push(table);
+  return { ...table };
+}
+
+// UPDATE — inline edit of a table's number and/or guest capacity. This is
+// the function the editable grid calls on blur/Enter for each cell.
+export async function updateBranchTable(id, { tableNumber, guestCapacity }) {
+  // Real version later:
+  // return apiFetch(`/api/branch-tables/${id}`, { method: "PUT", body: JSON.stringify({ tableNumber, guestCapacity }) });
+  await delay();
+  const idx = BRANCH_TABLES.findIndex((t) => t.id === id);
+  if (idx === -1) throw new Error("Table not found.");
+  const current = BRANCH_TABLES[idx];
+
+  const num = tableNumber !== undefined ? validateTableNumber(tableNumber) : current.tableNumber;
+  const cap = guestCapacity !== undefined ? validateGuestCapacity(guestCapacity) : current.guestCapacity;
+
+  const clash = BRANCH_TABLES.some((t) => t.id !== id && t.branchId === current.branchId && t.tableNumber === num);
+  if (clash) throw new Error(`Table ${num} already exists for this branch.`);
+
+  BRANCH_TABLES[idx] = { ...current, tableNumber: num, guestCapacity: cap };
+  return { ...BRANCH_TABLES[idx] };
+}
+
+// DELETE — remove a single table (e.g. the branch physically removed one).
+export async function deleteBranchTable(id) {
+  // Real version later: return apiFetch(`/api/branch-tables/${id}`, { method: "DELETE" });
+  await delay();
+  const idx = BRANCH_TABLES.findIndex((t) => t.id === id);
+  if (idx === -1) throw new Error("Table not found.");
+  BRANCH_TABLES.splice(idx, 1);
   return { id };
 }
 
 // ---------------- Settings ----------------
 // Reads/writes the _settingsDB object declared up in the AI Analytics
 // section (so the engine sees live threshold values the moment the owner
-// saves them). Table counts are NOT part of _settingsDB — they live on
-// BRANCHES_DB itself, same as location/contact — but are still surfaced
-// through getSettingsData() so the Settings screen can load everything it
-// needs (per Ch.3 Fig. 23: analytics thresholds, receipt text, and "number
-// of tables per branch used by the POS table selection screen") in one call.
+// saves them). Per-branch table info is NOT part of _settingsDB — it lives
+// in BRANCH_TABLES above — but is still surfaced through getSettingsData()
+// as a lightweight summary (id/name/tableCount) so a Settings overview can
+// show "8 tables" next to each branch without a second round trip; the
+// Branch Tables screen itself calls getBranchTables()/updateBranchTable()
+// directly for the editable per-table grid.
 export async function getSettingsData() {
   // Real version later: return apiFetch("/api/settings");
   await delay();
   return {
     ..._settingsDB,
-    branchTables: BRANCHES_DB.map(({ id, name, tableCount }) => ({ id, name, tableCount })),
+    branchTables: BRANCHES_DB.map(({ id, name }) => ({ id, name, tableCount: computeTableCount(id) })),
   };
 }
 
