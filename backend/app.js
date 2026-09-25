@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const authRoutes = require('./src/routes/authRoutes');
+const branchRoutes = require('./src/routes/branchRoutes');
 const { notFound, errorHandler } = require('./src/middleware/errorHandler');
 const config = require('./src/config/config');
 const app = express();
@@ -23,6 +24,7 @@ app.get('/', (req, res) => {
 
 // Other endpoints
 app.use('/api/auth', authRoutes);
+app.use('/api/branches', branchRoutes);
 
 // Error Handler
 app.use(notFound);

@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const { findUserByUsername, findUserById, createUser } = require('../models/userModel');
 const generateToken = require('../utils/generateToken');
+const config = require('../config/config');
 
 async function register(req, res, next) {
   try {
@@ -55,7 +56,7 @@ async function login(req, res, next) {
     res
       .cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'development',
+        secure: config.nodeEnv === 'development',
         sameSite: 'none',
         maxAge: 8 * 60 * 60 * 1000
       })
