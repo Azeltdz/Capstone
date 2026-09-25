@@ -14,7 +14,6 @@ const loginLimiter = rateLimit({
 });
 
 router.post('/login', loginLimiter, loginRules, login);
-router.post('/register', protect, requireRole('owner'), registerRules, register); // owner-only
 router.get('/me', protect, getMe);
 router.post('/logout', protect, logout);
 

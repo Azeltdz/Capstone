@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const authRoutes = require('./src/routes/authRoutes');
 const branchRoutes = require('./src/routes/branchRoutes');
 const tableRoutes = require('./src/routes/tableRoutes');
+const staffRoutes = require('./src/routes/staffRoutes');
 
 const config = require('./src/config/config');
 const { notFound, errorHandler } = require('./src/middleware/errorHandler');
@@ -29,6 +30,7 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api', tableRoutes);
+app.use('/api/staff', staffRoutes);
 
 // Error Handler
 app.use(notFound);
