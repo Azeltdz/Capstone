@@ -4,6 +4,7 @@ const {
   createBranch,
   updateBranch
 } = require('../models/branchModel');
+const { getTablesByBranch } = require('../models/tableModel');
 
 // GET /api/branches
 async function listBranches(req, res, next) {
@@ -58,6 +59,15 @@ async function editBranch(req, res, next) {
     const { id } = req.params;
     const existing = await getBranchById(id);
     if (!existing) return res.status(404).json({ message: 'Branch not found' });
+
+    if (req.body.table_count !== undefined) {
+      const currentTables = await getTablesByBranch(id);
+      if (req.body.table_count < currentTables.length) {
+        return res.status(400).json({
+          message: `Cannot set table_count below ${currentTables.length} — that many tables already exist. Delete tables first.`
+        });
+      }
+    }
 
     const branch = await updateBranch(id, req.body);
     res.json({ message: 'Branch updated', branch });

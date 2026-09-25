@@ -3,10 +3,13 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+
 const authRoutes = require('./src/routes/authRoutes');
 const branchRoutes = require('./src/routes/branchRoutes');
-const { notFound, errorHandler } = require('./src/middleware/errorHandler');
+const tableRoutes = require('./src/routes/tableRoutes');
+
 const config = require('./src/config/config');
+const { notFound, errorHandler } = require('./src/middleware/errorHandler');
 const app = express();
 
 // Middlewares
@@ -19,12 +22,13 @@ app.use(morgan('dev'));
 
 // Root endpoint
 app.get('/', (req, res) => {
-  res.json({message : "Hello"});
+  res.json({message : "Hello!"});
 })
 
 // Other endpoints
 app.use('/api/auth', authRoutes);
 app.use('/api/branches', branchRoutes);
+app.use('/api', tableRoutes);
 
 // Error Handler
 app.use(notFound);
