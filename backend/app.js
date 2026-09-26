@@ -12,6 +12,7 @@ const staffRoutes = require('./src/routes/staffRoutes');
 const ingredientRoutes = require('./src/routes/ingredientRoutes');
 const menuRoutes = require('./src/routes/menuRoutes');
 const bomRoutes = require('./src/routes/bomRoutes');
+const inventoryRoutes = require('./src/routes/inventoryRoutes');
 
 const config = require('./src/config/config');
 const { notFound, errorHandler } = require('./src/middleware/errorHandler');
@@ -42,6 +43,7 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/ingredients', ingredientRoutes);
 app.use('/api/menu-items', menuRoutes);
 app.use('/api/bom', bomRoutes);
+app.use('/api', inventoryRoutes);
 
 // Error Handler
 app.use(notFound);
