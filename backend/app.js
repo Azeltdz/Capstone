@@ -15,6 +15,8 @@ const bomRoutes = require('./src/routes/bomRoutes');
 const inventoryRoutes = require('./src/routes/inventoryRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
 
+const settingsRoutes = require('./src/routes/settingsRoutes');
+
 const config = require('./src/config/config');
 const { notFound, errorHandler } = require('./src/middleware/errorHandler');
 const app = express();
@@ -46,6 +48,7 @@ app.use('/api/menu-items', menuRoutes);
 app.use('/api/bom', bomRoutes);
 app.use('/api', inventoryRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api', settingsRoutes);
 
 // Error Handler
 app.use(notFound);
