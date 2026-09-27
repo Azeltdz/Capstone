@@ -1,23 +1,27 @@
-// src/pages/cashier/POSView.jsx
 import { useState } from "react";
+import toast from "react-hot-toast";
 import OrderTypeStep from "./pos/OrderTypeStep";
 import DineInDetailsModal from "./pos/DineInDetailsModal";
 import TableStep from "./pos/TableStep";
 import MenuStep from "./pos/MenuStep";
 import CartPanel from "./pos/CartPanel";
 import OrderPlacedModal from "./pos/OrderPlacedModal";
+import { usePlaceOrder } from "../../hooks/useOrders";
 
-const ORDER_ID = "#TXN-0248"; // mock — the real id will come from the backend
+const PENDING_ORDER_LABEL = "New Order";
+const ORDER_TYPE_MAP = { "Dine-in": "dine-in", "Take-out": "take-out", "Delivery": "delivery" };
 
 export default function POSView() {
-  const [step, setStep] = useState("type"); // "type" | "table" | "menu"
+  const [step, setStep] = useState("type");
   const [orderType, setOrderType] = useState(null);
-  const [customer, setCustomer] = useState(null); // { name, phone, guests } — Dine-in only
+  const [customer, setCustomer] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [table, setTable] = useState(null);
-  const [cart, setCart] = useState({}); // { [itemId]: { id, name, price, qty } }
-  const [paymentMethod, setPaymentMethod] = useState(null); // "Cash" | "GCash" | null
-  const [placedOrder, setPlacedOrder] = useState(null); // snapshot shown in the "Order Placed" popup
+  const [table, setTable] = useState(null); // { table_id, table_number }
+  const [cart, setCart] = useState({});
+  const [paymentMethod, setPaymentMethod] = useState(null);
+  const [placedOrder, setPlacedOrder] = useState(null);
+
+  const { mutate: submitOrder, isPending: isPlacingOrder } = usePlaceOrder();
 
   function resetOrder() {
     setStep("type");
@@ -32,11 +36,8 @@ export default function POSView() {
 
   function handleOrderTypeSelect(type) {
     if (type === "Dine-in") {
-      // Dine-in collects customer details in a popup first. The order type is only
-      // committed once the popup is submitted, so closing it leaves nothing half-selected.
       setShowDetailsModal(true);
     } else {
-      // Take-out/Delivery skip straight to the menu.
       setOrderType(type);
       setStep("menu");
     }
@@ -49,38 +50,51 @@ export default function POSView() {
     setStep("table");
   }
 
-  function handleTableSelect(tableNumber) {
-    setTable(tableNumber);
+  function handleTableSelect(tableInfo) {
+    setTable(tableInfo);
     setStep("menu");
   }
 
   function handleQtyChange(item, newQty) {
+    const id = item.item_id ?? item.id;
     const next = { ...cart };
     if (newQty <= 0) {
-      delete next[item.id];
+      delete next[id];
     } else {
-      next[item.id] = { id: item.id, name: item.name, price: item.price, qty: newQty };
+      next[id] = {
+        id,
+        name: item.item_name ?? item.name,
+        price: item.selling_price !== undefined ? Number(item.selling_price) : item.price,
+        qty: newQty,
+      };
     }
     setCart(next);
 
-    // Nothing left in the cart → nothing to pay for, so clear the payment method.
     if (Object.keys(next).length === 0) {
       setPaymentMethod(null);
     }
   }
 
-  function handlePlaceOrder(totals) {
-    // Real version later: POST /api/transactions with { orderType, customer, table, cart, paymentMethod }
-    // and use the id returned by the backend. For now, snapshot everything into the popup.
-    setPlacedOrder({
-      id: ORDER_ID,
-      orderType,
-      table,
-      customer,
-      paymentMethod,
-      placedAt: new Date().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }),
-      lines: Object.values(cart),
-      ...totals, // itemCount, subtotal, tax, total
+  function handlePlaceOrder() {
+    const items = Object.values(cart).map((line) => ({
+      item_id: line.id,
+      quantity: line.qty,
+    }));
+
+    const payload = {
+      order_type: ORDER_TYPE_MAP[orderType],
+      payment_method: paymentMethod.toLowerCase(),
+      items,
+      ...(orderType === "Dine-in" ? { table_id: table.table_id } : {}),
+    };
+
+    submitOrder(payload, {
+      onSuccess: (data) => {
+        setPlacedOrder({ ...data.order, customer });
+      },
+      onError: (err) => {
+        toast.error(err.message || "Could not place order.");
+      },
     });
   }
 
@@ -95,7 +109,6 @@ export default function POSView() {
     }
   }
 
-  // Dine-in: type → table → menu (step 3). Others: type → menu (step 2).
   const menuStepNumber = orderType === "Dine-in" ? 3 : 2;
 
   return (
@@ -107,7 +120,7 @@ export default function POSView() {
       )}
 
       <CartPanel
-        orderId={ORDER_ID}
+        orderId={PENDING_ORDER_LABEL}
         step={step}
         orderType={orderType}
         customer={customer}
@@ -117,6 +130,7 @@ export default function POSView() {
         paymentMethod={paymentMethod}
         onSelectPayment={setPaymentMethod}
         onPlaceOrder={handlePlaceOrder}
+        isPlacing={isPlacingOrder}
       />
 
       {placedOrder && <OrderPlacedModal order={placedOrder} onClose={resetOrder} />}

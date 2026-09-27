@@ -1,18 +1,16 @@
-// src/pages/cashier/pos/CartPanel.jsx
-const TAX_RATE = 0.0525; // 5.25%, matches the reference layout's tax line
 const PAYMENT_METHODS = ["Cash", "GCash"];
 
-export default function CartPanel({ orderId, step, orderType, customer, table, cart, onQtyChange, paymentMethod, onSelectPayment, onPlaceOrder }) {
+export default function CartPanel({
+  orderId, step, orderType, customer, table, cart, onQtyChange,
+  paymentMethod, onSelectPayment, onPlaceOrder, isPlacing,
+}) {
   const lines = Object.values(cart);
   const itemCount = lines.reduce((sum, l) => sum + l.qty, 0);
-  const subtotal = lines.reduce((sum, l) => sum + l.qty * l.price, 0);
-  const tax = subtotal * TAX_RATE;
-  const total = subtotal + tax;
+  const total = lines.reduce((sum, l) => sum + l.qty * l.price, 0);
 
-  const orderLabel = orderType === "Dine-in" && table ? `Dine-in · Table ${table}` : orderType;
-  const canPlaceOrder = lines.length > 0 && paymentMethod !== null;
+  const orderLabel = orderType === "Dine-in" && table ? `Dine-in · Table ${table.table_number}` : orderType;
+  const canPlaceOrder = lines.length > 0 && paymentMethod !== null && !isPlacing;
 
-  // Customer info only exists for Dine-in, and is shown once it's been entered.
   const showCustomer = orderType === "Dine-in" && customer && (step === "table" || step === "menu");
 
   return (
@@ -70,28 +68,9 @@ export default function CartPanel({ orderId, step, orderType, customer, table, c
                   </div>
                   <div className="order-line-footer">
                     <div className="order-line-actions">
-                      <button
-                        className="order-line-add"
-                        onClick={() => onQtyChange(line, line.qty + 1)}
-                        aria-label={`Add one ${line.name}`}
-                      >
-                        ＋
-                      </button>
-                      <button
-                        className="order-line-minus"
-                        onClick={() => onQtyChange(line, line.qty - 1)}
-                        disabled={line.qty <= 1}
-                        aria-label={`Remove one ${line.name}`}
-                      >
-                        －
-                      </button>
-                      <button
-                        className="order-line-remove"
-                        onClick={() => onQtyChange(line, 0)}
-                        aria-label={`Delete ${line.name}`}
-                      >
-                        🗑
-                      </button>
+                      <button className="order-line-add" onClick={() => onQtyChange(line, line.qty + 1)} aria-label={`Add one ${line.name}`}>＋</button>
+                      <button className="order-line-minus" onClick={() => onQtyChange(line, line.qty - 1)} disabled={line.qty <= 1} aria-label={`Remove one ${line.name}`}>－</button>
+                      <button className="order-line-remove" onClick={() => onQtyChange(line, 0)} aria-label={`Delete ${line.name}`}>🗑</button>
                     </div>
                     <span className="order-line-price">₱{(line.price * line.qty).toFixed(2)}</span>
                   </div>
@@ -101,28 +80,15 @@ export default function CartPanel({ orderId, step, orderType, customer, table, c
           )}
 
           <div className="order-summary">
-            <div className="order-summary-row">
-              <span>Items ({itemCount})</span>
-              <span>₱{subtotal.toFixed(2)}</span>
-            </div>
-            <div className="order-summary-row">
-              <span>Tax (5.25%)</span>
-              <span>₱{tax.toFixed(2)}</span>
-            </div>
             <div className="order-summary-row order-summary-total">
-              <span>Total</span>
+              <span>Total ({itemCount} items)</span>
               <span>₱{total.toFixed(2)}</span>
             </div>
           </div>
 
           <div className="payment-row">
             {PAYMENT_METHODS.map((method) => (
-              <button
-                key={method}
-                className={`payment-btn ${paymentMethod === method ? "selected" : ""}`}
-                onClick={() => onSelectPayment(method)}
-                aria-pressed={paymentMethod === method}
-              >
+              <button key={method} className={`payment-btn ${paymentMethod === method ? "selected" : ""}`} onClick={() => onSelectPayment(method)} aria-pressed={paymentMethod === method}>
                 {method}
               </button>
             ))}
@@ -132,8 +98,8 @@ export default function CartPanel({ orderId, step, orderType, customer, table, c
             <button className="btn btn-outline" onClick={() => alert("Receipt would print here.")} disabled={lines.length === 0}>
               Print Receipt
             </button>
-            <button className="btn btn-navy" onClick={() => onPlaceOrder({ itemCount, subtotal, tax, total })} disabled={!canPlaceOrder}>
-              Place Order
+            <button className="btn btn-navy" onClick={onPlaceOrder} disabled={!canPlaceOrder}>
+              {isPlacing ? "Placing…" : "Place Order"}
             </button>
           </div>
         </>

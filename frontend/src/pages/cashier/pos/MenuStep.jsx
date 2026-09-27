@@ -1,43 +1,12 @@
 // src/pages/cashier/pos/MenuStep.jsx
-import { useEffect, useState } from "react";
-import { getMenuCategories, getMenuItems } from "../../../api/mockCashier";
+import { useState } from "react";
+import { useMenuCategories, useMenuItemsByCategory } from "../../../hooks/useMenuItems";
 
-// stepNumber comes from POSView: 3 for Dine-in (type → table → menu), 2 for Take-out/Delivery.
 export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
-  const [categories, setCategories] = useState(null);
-  const [categoriesError, setCategoriesError] = useState("");
   const [activeCategory, setActiveCategory] = useState(null);
-
-  const [items, setItems] = useState(null);
-  const [itemsError, setItemsError] = useState("");
-
-  // Load categories once, default to the first one so the menu isn't empty.
-  useEffect(() => {
-    let cancelled = false;
-    getMenuCategories()
-      .then((data) => {
-        if (cancelled) return;
-        setCategories(data);
-        if (data.length > 0) setActiveCategory(data[0].key);
-      })
-      .catch((err) => !cancelled && setCategoriesError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load items whenever the active category changes.
-  useEffect(() => {
-    if (!activeCategory) return;
-    let cancelled = false;
-    setItems(null);
-    getMenuItems(activeCategory)
-      .then((data) => !cancelled && setItems(data))
-      .catch((err) => !cancelled && setItemsError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCategory]);
+  const { categories, isLoading: categoriesLoading, error: categoriesError } = useMenuCategories();
+  const effectiveCategory = activeCategory ?? categories[0]?.key ?? null;
+  const { items, isLoading: itemsLoading, error: itemsError } = useMenuItemsByCategory(effectiveCategory);
 
   return (
     <div className="pos-main">
@@ -48,40 +17,39 @@ export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
       <p className="step-sub">Choose a category, then add items to the order</p>
 
       <div className="category-grid">
-        {categoriesError && <p className="error-text">Couldn't load categories. {categoriesError}</p>}
-        {!categoriesError && !categories && <p className="loading-text">Loading categories…</p>}
-        {categories &&
-          categories.map((cat) => (
-            <button
-              key={cat.key}
-              className={`category-card ${activeCategory === cat.key ? "selected" : ""}`}
-              style={{ "--category-accent": cat.accent }}
-              onClick={() => setActiveCategory(cat.key)}
-            >
-              <span className="category-icon">{cat.icon}</span>
-              <span className="category-name">{cat.name}</span>
-              <span className="category-count">{cat.itemCount} Items</span>
-            </button>
-          ))}
+        {categoriesError && <p className="error-text">Couldn't load categories. {categoriesError.message}</p>}
+        {categoriesLoading && <p className="loading-text">Loading categories…</p>}
+        {categories.map((cat) => (
+          <button
+            key={cat.key}
+            className={`category-card ${effectiveCategory === cat.key ? "selected" : ""}`}
+            style={{ "--category-accent": cat.accent }}
+            onClick={() => setActiveCategory(cat.key)}
+          >
+            <span className="category-icon">{cat.icon}</span>
+            <span className="category-name">{cat.name}</span>
+            <span className="category-count">{cat.itemCount} Items</span>
+          </button>
+        ))}
       </div>
 
       <div className="item-grid">
-        {itemsError && <p className="error-text">Couldn't load items. {itemsError}</p>}
-        {!itemsError && !items && <p className="loading-text">Loading items…</p>}
-        {items &&
+        {itemsError && <p className="error-text">Couldn't load items. {itemsError.message}</p>}
+        {itemsLoading && <p className="loading-text">Loading items…</p>}
+        {!itemsLoading &&
           items.map((item) => {
-            const qty = cart[item.id]?.qty || 0;
+            const qty = cart[item.item_id]?.qty || 0;
             return (
-              <div className="item-card" key={item.id}>
-                <span className="item-name">{item.name}</span>
-                <span className="item-price">₱{item.price.toFixed(2)}</span>
+              <div className="item-card" key={item.item_id}>
+                <span className="item-name">{item.item_name}</span>
+                <span className="item-price">₱{Number(item.selling_price).toFixed(2)}</span>
                 <div className="item-stepper">
                   <button
                     className="stepper-btn"
                     disabled={qty === 0}
                     onClick={() => onQtyChange(item, qty - 1)}
                   >
-                    −
+                    -
                   </button>
                   <span className="stepper-qty">{qty}</span>
                   <button className="stepper-btn" onClick={() => onQtyChange(item, qty + 1)}>
@@ -91,7 +59,7 @@ export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
               </div>
             );
           })}
-        {items && items.length === 0 && <p className="loading-text">No items in this category yet.</p>}
+        {!itemsLoading && items.length === 0 && <p className="loading-text">No items in this category yet.</p>}
       </div>
     </div>
   );

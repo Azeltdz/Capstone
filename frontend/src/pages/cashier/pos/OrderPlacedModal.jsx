@@ -1,10 +1,10 @@
-// src/pages/cashier/pos/OrderPlacedModal.jsx
 import { useEffect } from "react";
 
-const peso = (n) => `₱${n.toFixed(2)}`;
+const peso = (n) => `₱${Number(n).toFixed(2)}`;
+
+const ORDER_TYPE_LABELS = { "dine-in": "Dine-in", "take-out": "Take-out", "delivery": "Delivery" };
 
 export default function OrderPlacedModal({ order, onClose }) {
-  // Close on Escape (same as the Create Order popup).
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key === "Escape") onClose();
@@ -13,17 +13,21 @@ export default function OrderPlacedModal({ order, onClose }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const { id, orderType, table, customer, paymentMethod, placedAt, lines, itemCount, subtotal, tax, total } = order;
+  const {
+    transaction_id, order_type, table_number, payment_method,
+    transaction_at, items, total_amount, customer,
+  } = order;
 
-  // Only show the rows that exist for this order type (customer/table are Dine-in only).
+  const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
+
   const details = [
-    ["Order type", orderType],
-    table ? ["Table", `Table ${table}`] : null,
+    ["Order type", ORDER_TYPE_LABELS[order_type] || order_type],
+    table_number ? ["Table", `Table ${table_number}`] : null,
     customer ? ["Customer", customer.name] : null,
     customer?.phone ? ["Phone", customer.phone] : null,
     customer ? ["Guests", `${customer.guests} ${customer.guests === 1 ? "Person" : "People"}`] : null,
-    ["Payment", paymentMethod],
-    ["Placed", placedAt],
+    ["Payment", payment_method],
+    ["Placed", new Date(transaction_at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })],
   ].filter(Boolean);
 
   return (
@@ -32,11 +36,9 @@ export default function OrderPlacedModal({ order, onClose }) {
         <div className="modal-header">
           <div>
             <h3 id="order-placed-title">Order Placed</h3>
-            <span className="receipt-id">{id}</span>
+            <span className="receipt-id">#TXN-{String(transaction_id).padStart(4, "0")}</span>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="modal-body">
@@ -50,34 +52,24 @@ export default function OrderPlacedModal({ order, onClose }) {
           </dl>
 
           <ul className="receipt-items">
-            {lines.map((line) => (
-              <li className="receipt-item" key={line.id}>
+            {items.map((line) => (
+              <li className="receipt-item" key={line.item_id}>
                 <span className="receipt-item-name">
-                  {line.name} <span className="receipt-item-qty">×{line.qty}</span>
+                  {line.item_name} <span className="receipt-item-qty">×{line.quantity}</span>
                 </span>
-                <span>{peso(line.price * line.qty)}</span>
+                <span>{peso(line.subtotal)}</span>
               </li>
             ))}
           </ul>
 
           <div className="receipt-summary">
-            <div className="receipt-row">
-              <dt>Items ({itemCount})</dt>
-              <dd>{peso(subtotal)}</dd>
-            </div>
-            <div className="receipt-row">
-              <dt>Tax (5.25%)</dt>
-              <dd>{peso(tax)}</dd>
-            </div>
             <div className="receipt-row receipt-total">
-              <dt>Total</dt>
-              <dd>{peso(total)}</dd>
+              <dt>Total ({itemCount} items)</dt>
+              <dd>{peso(total_amount)}</dd>
             </div>
           </div>
 
-          <button type="button" className="btn btn-navy modal-submit" onClick={onClose}>
-            Done
-          </button>
+          <button type="button" className="btn btn-navy modal-submit" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
