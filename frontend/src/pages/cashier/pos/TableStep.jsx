@@ -1,20 +1,12 @@
 // src/pages/cashier/pos/TableStep.jsx
-import { useEffect, useState } from "react";
-import { getTables } from "../../../api/mockCashier";
+import { useAuth } from "../../../context/AuthContext";
+import { useTables } from "../../../hooks/useTables";
 
 export default function TableStep({ onSelect, onBack }) {
-  const [tables, setTables] = useState(null);
-  const [error, setError] = useState("");
+  const { user } = useAuth();
+  const branchId = user?.branch_id;
 
-  useEffect(() => {
-    let cancelled = false;
-    getTables()
-      .then((data) => !cancelled && setTables(data))
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: tables, isLoading, error } = useTables(branchId);
 
   return (
     <div className="pos-main">
@@ -25,21 +17,21 @@ export default function TableStep({ onSelect, onBack }) {
       <p className="step-sub">Choose an available table for this dine-in order</p>
 
       <div className="table-grid">
-        {error && <p className="error-text">Couldn't load tables. {error}</p>}
-        {!error && !tables && <p className="loading-text">Loading tables…</p>}
+        {error && <p className="error-text">Couldn't load tables. {error.message}</p>}
+        {isLoading && <p className="loading-text">Loading tables…</p>}
         {tables &&
           tables.map((table) => {
             const isOccupied = table.status === "occupied";
             return (
               <button
-                key={table.number}
+                key={table.table_id}
                 className={`table-card ${isOccupied ? "table-occupied" : "table-available"}`}
                 disabled={isOccupied}
-                onClick={() => onSelect(table.number)}
+                onClick={() => onSelect({ table_id: table.table_id, table_number: table.table_number })}
               >
                 <span className="table-icon">🍽️</span>
-                <span className="table-name">Table {table.number}</span>
-                <span className="table-seats">{table.seats} seats</span>
+                <span className="table-name">Table {table.table_number}</span>
+                <span className="table-seats">{table.guest_capacity} seats</span>
                 <span className={`badge ${isOccupied ? "badge-flag" : "badge-good"}`}>
                   {isOccupied ? "Occupied" : "Available"}
                 </span>

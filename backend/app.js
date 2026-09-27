@@ -34,8 +34,8 @@ app.use(morgan('dev'));
 
 // Root endpoint
 app.get('/', (req, res) => {
-  res.json({message : "Hello!"});
-})
+  res.json({ message: "Hello!", status: 'ok' });
+});
 
 // Other endpoints
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

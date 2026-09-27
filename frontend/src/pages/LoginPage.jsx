@@ -34,7 +34,7 @@ export default function LoginPage() {
 
       if (user.role !== role) {
         setError(`This account is registered as ${user.role}, not ${role}.`);
-        sessionStorage.clear(); // undo the login() side-effect since the role check failed
+        sessionStorage.clear();
         setLoading(false);
         return;
       }
