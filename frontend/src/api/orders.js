@@ -8,7 +8,10 @@ export function placeOrder(payload) {
 }
 
 export function getOrders(params = {}) {
-  const query = new URLSearchParams(params).toString();
+  const clean = Object.fromEntries(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
+  );
+  const query = new URLSearchParams(clean).toString();
   return apiFetch(`/api/orders${query ? `?${query}` : ""}`);
 }
 

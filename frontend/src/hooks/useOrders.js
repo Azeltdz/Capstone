@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { placeOrder, getOrders } from "../api/orders";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { placeOrder, getOrders, getOrderById } from "../api/orders";
 
 export function usePlaceOrder() {
   const queryClient = useQueryClient();
@@ -18,5 +18,14 @@ export function useOrders(params) {
   return useQuery({
     queryKey: ["orders", params],
     queryFn: () => getOrders(params),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useOrder(id) {
+  return useQuery({
+    queryKey: ["orders", "detail", id],
+    queryFn: () => getOrderById(id),
+    enabled: !!id,
   });
 }

@@ -85,8 +85,14 @@ export default function POSView() {
       order_type: ORDER_TYPE_MAP[orderType],
       payment_method: paymentMethod.toLowerCase(),
       items,
-      ...(orderType === "Dine-in" ? { table_id: table.table_id } : {}),
-    };
+      ...(orderType === "Dine-in"
+        ? {
+            table_id: table.table_id,
+            customer_name: customer?.name?.trim() || undefined,
+            guest_count: customer?.guests ? Number(customer.guests) : undefined,
+          }
+        : {}),
+    }
 
     submitOrder(payload, {
       onSuccess: (data) => {

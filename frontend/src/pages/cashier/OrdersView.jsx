@@ -1,41 +1,57 @@
 // src/pages/cashier/OrdersView.jsx
-import { useEffect, useState, useCallback, useRef } from "react";
-import { fetchOrders } from "../../api/mockCashier";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { format } from "date-fns";
+import { useOrders, useOrder } from "../../hooks/useOrders";
+import { useDebounce } from "../../hooks/useDebounce";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
-  { value: "Dine-in", label: "Dine-in" },
-  { value: "Take-out", label: "Take-out" },
-  { value: "Delivery", label: "Delivery" },
+  { value: "dine-in", label: "Dine-in" },
+  { value: "take-out", label: "Take-out" },
+  { value: "delivery", label: "Delivery" },
+];
+
+const PAYMENT_OPTIONS = [
+  { value: "all", label: "All Payments" },
+  { value: "cash", label: "Cash" },
+  { value: "gcash", label: "GCash" },
 ];
 
 function badgeClassForType(type) {
-  if (type === "Dine-in") return "badge-dinein";
-  if (type === "Take-out") return "badge-takeout";
-  if (type === "Delivery") return "badge-delivery";
+  if (type === "dine-in") return "badge-dinein";
+  if (type === "take-out") return "badge-takeout";
+  if (type === "delivery") return "badge-delivery";
   return "";
 }
 
+function typeLabel(type) {
+  return TYPE_OPTIONS.find((t) => t.value === type)?.label || type;
+}
+
 function formatPeso(amount) {
-  return "₱" + amount.toFixed(2);
+  return "₱" + Number(amount).toFixed(2);
 }
 
-// "Lomi Special ×2, Chopsuey ×1" -> [{ name: "Lomi Special", qty: "2" }, ...]
-function parseItems(itemsString = "") {
-  return itemsString
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const [name, qty] = part.split("×").map((p) => p.trim());
-      return { name, qty: qty || "1" };
-    });
+function initialsFor(name = "") {
+  return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function OrderDetailsModal({ order, onClose }) {
+function guestsLabel(count) {
+  return `${count} ${count === 1 ? "guest" : "guests"}`;
+}
+
+function orderLabelFor(order) {
+  const base =
+    order.order_type === "dine-in" && order.table_number
+      ? `Dine-in · Table ${order.table_number}`
+      : typeLabel(order.order_type);
+  return order.guest_count ? `${base} · ${guestsLabel(order.guest_count)}` : base;
+}
+
+function OrderDetailsModal({ orderId, onClose }) {
   const closeBtnRef = useRef(null);
+  const { data: order, isLoading, error } = useOrder(orderId);
 
-  // Close on Escape, lock background scroll, focus the close button.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -50,8 +66,6 @@ function OrderDetailsModal({ order, onClose }) {
     };
   }, [onClose]);
 
-  const items = parseItems(order.items);
-
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -63,74 +77,81 @@ function OrderDetailsModal({ order, onClose }) {
       >
         <div className="modal-header">
           <div>
-            <h3 className="modal-title" id="order-modal-title">
-              Order Details
-            </h3>
-            <span className="modal-subtitle">{order.id}</span>
+            <h3 className="modal-title" id="order-modal-title">Order Details</h3>
+            <span className="modal-subtitle">#TXN-{String(orderId).padStart(4, "0")}</span>
           </div>
-          <button
-            ref={closeBtnRef}
-            className="modal-close"
-            onClick={onClose}
-            aria-label="Close order details"
-          >
+          <button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Close order details">
             ✕
           </button>
         </div>
 
-        <div className="modal-customer">
-          <span className="order-card-avatar">{order.initials}</span>
-          <div className="order-card-identity">
-            <span className="order-card-customer">{order.customer}</span>
-            <span className="order-card-label">{order.orderLabel}</span>
-          </div>
-        </div>
+        {isLoading && <p className="loading-text">Loading order…</p>}
+        {error && <p className="error-text">Couldn't load order. {error.message}</p>}
 
-        <dl className="modal-grid">
-          <div>
-            <dt>Order type</dt>
-            <dd>
-              <span className={`badge ${badgeClassForType(order.type)}`}>{order.type}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Payment</dt>
-            <dd>{order.payment}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd>
-              <span className={`status-dot ${order.dotClass}`} /> {order.status}
-              <span className="modal-muted"> · {order.subtext}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Date &amp; time</dt>
-            <dd>{order.date}</dd>
-          </div>
-        </dl>
-
-        <div className="modal-items">
-          <div className="modal-items-head">
-            <span>Item</span>
-            <span>Qty</span>
-          </div>
-          {items.map((it, i) => (
-            <div className="modal-items-row" key={i}>
-              <span>{it.name}</span>
-              <span>×{it.qty}</span>
+        {order && (
+          <>
+            <div className="modal-customer">
+              <span className="order-card-avatar">
+                {order.customer_name ? initialsFor(order.customer_name) : "—"}
+              </span>
+              <div className="order-card-identity">
+                <span className="order-card-customer">{order.customer_name || "No customer name"}</span>
+                <span className="order-card-label">{orderLabelFor(order)}</span>
+              </div>
             </div>
-          ))}
-        </div>
 
-        <div className="modal-total">
-          <span>{order.itemCount} Items · Total</span>
-          <span>{formatPeso(order.total)}</span>
-        </div>
+            <dl className="modal-grid">
+              <div>
+                <dt>Order type</dt>
+                <dd><span className={`badge ${badgeClassForType(order.order_type)}`}>{typeLabel(order.order_type)}</span></dd>
+              </div>
+              <div>
+                <dt>Payment</dt>
+                <dd>{order.payment_method}</dd>
+              </div>
+              {order.table_number && (
+                <div>
+                  <dt>Table</dt>
+                  <dd>Table {order.table_number}</dd>
+                </div>
+              )}
+              {order.guest_count && (
+                <div>
+                  <dt>Guests</dt>
+                  <dd>{guestsLabel(order.guest_count)}</dd>
+                </div>
+              )}
+              <div>
+                <dt>Cashier</dt>
+                <dd>{order.cashier_name}</dd>
+              </div>
+              <div>
+                <dt>Date &amp; time</dt>
+                <dd>{format(new Date(order.transaction_at), "MMMM d, yyyy h:mm a")}</dd>
+              </div>
+            </dl>
 
-        <button className="modal-done" onClick={onClose}>
-          Close
-        </button>
+            <div className="modal-items">
+              <div className="modal-items-head">
+                <span>Item</span>
+                <span>Qty</span>
+              </div>
+              {order.items.map((it) => (
+                <div className="modal-items-row" key={it.tx_item_id}>
+                  <span>{it.item_name}</span>
+                  <span>×{it.quantity}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-total">
+              <span>{order.items.reduce((sum, i) => sum + i.quantity, 0)} Items · Total</span>
+              <span>{formatPeso(order.total_amount)}</span>
+            </div>
+          </>
+        )}
+
+        <button className="modal-done" onClick={onClose}>Close</button>
       </div>
     </div>
   );
@@ -138,53 +159,24 @@ function OrderDetailsModal({ order, onClose }) {
 
 export default function OrdersView() {
   const [activeType, setActiveType] = useState("all");
-  const [activePayment, setActivePayment] = useState("All");
+  const [activePayment, setActivePayment] = useState("all");
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const search = useDebounce(searchInput, 300);
+  const [date, setDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
 
-  const [orders, setOrders] = useState([]);
-  const [status, setStatus] = useState("loading"); // "loading" | "ready" | "error"
-  const [errorMsg, setErrorMsg] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const closeModal = useCallback(() => setSelectedOrderId(null), []);
 
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const closeModal = useCallback(() => setSelectedOrder(null), []);
-
-  // Debounce the customer-name search, same pattern used elsewhere in the app.
-  const debounceTimer = useRef(null);
-  useEffect(() => {
-    clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => setSearch(searchInput.trim()), 300);
-    return () => clearTimeout(debounceTimer.current);
-  }, [searchInput]);
-
-  // Guards against a slower, older request (e.g. from a filter click that's
-  // since been superseded by another) resolving AFTER a newer one and
-  // overwriting it with stale data. Real risk here since two filters
-  // (type + payment) can each trigger a fetch in quick succession.
-  const requestIdRef = useRef(0);
-
-  const load = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    setStatus("loading");
-    try {
-      const data = await fetchOrders({
-        type: activeType,
-        payment: activePayment === "All" ? "all" : activePayment,
-        search,
-      });
-      if (requestId !== requestIdRef.current) return; // a newer request has since started — ignore this one
-      setOrders(data.orders);
-      setStatus("ready");
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setErrorMsg(err.message);
-      setStatus("error");
-    }
-  }, [activeType, activePayment, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data: orders, isLoading, error } = useOrders({
+    order_type: activeType === "all" ? undefined : activeType,
+    date,
+    search: search.trim() || undefined,
+  });
+  // Payment isn't a server-side filter, so narrow the result here.
+  const filteredOrders = useMemo(() => {
+    if (!orders) return [];
+    return orders.filter((o) => activePayment === "all" || o.payment_method === activePayment);
+  }, [orders, activePayment]);
 
   return (
     <>
@@ -192,17 +184,20 @@ export default function OrdersView() {
         <h2 className="orders-title">Orders</h2>
 
         <div className="orders-header-controls">
-          <select
-            className="type-select"
-            value={activeType}
-            onChange={(e) => setActiveType(e.target.value)}
-            aria-label="Filter by order type"
-          >
-            {TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
+          <input
+            type="date"
+            className="date-select"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            aria-label="Filter by date"
+          />
+
+          <select className="type-select" value={activeType} onChange={(e) => setActiveType(e.target.value)} aria-label="Filter by order type">
+            {TYPE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+
+          <select className="type-select" value={activePayment} onChange={(e) => setActivePayment(e.target.value)} aria-label="Filter by payment method">
+            {PAYMENT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
 
           <input
@@ -215,41 +210,43 @@ export default function OrdersView() {
         </div>
       </div>
 
-      {status === "loading" && <p className="loading-text">Loading orders…</p>}
-      {status === "error" && <p className="error-text">Couldn't load orders. {errorMsg}</p>}
-      {status === "ready" && orders.length === 0 && (
+      {isLoading && <p className="loading-text">Loading orders…</p>}
+      {error && <p className="error-text">Couldn't load orders. {error.message}</p>}
+      {!isLoading && !error && filteredOrders.length === 0 && (
         <p className="loading-text">No orders match your filters.</p>
       )}
 
-      {status === "ready" && orders.length > 0 && (
+      {!isLoading && !error && filteredOrders.length > 0 && (
         <div className="order-card-grid">
-          {orders.map((order) => (
-            <div className="order-card" key={order.id}>
+          {filteredOrders.map((order) => (
+            <div className="order-card" key={order.transaction_id}>
               <div className="order-card-top">
-                <span className="order-card-avatar">{order.initials}</span>
+                <span className="order-card-avatar">
+                  {order.customer_name ? initialsFor(order.customer_name) : "—"}
+                </span>
                 <div className="order-card-identity">
-                  <span className="order-card-customer">{order.customer}</span>
-                  <span className="order-card-label">{order.orderLabel}</span>
+                  <span className="order-card-customer">{order.customer_name || "No customer name"}</span>
+                  <span className="order-card-label">{orderLabelFor(order)}</span>
                 </div>
                 <div className="order-card-status">
-                  <span className={`badge ${badgeClassForType(order.type)}`}>{order.type}</span>
-                  <span className="order-card-subtext">{order.payment}</span>
+                  <span className={`badge ${badgeClassForType(order.order_type)}`}>{typeLabel(order.order_type)}</span>
+                  <span className="order-card-subtext">{order.payment_method}</span>
                 </div>
               </div>
 
               <div className="order-card-meta">
-                <span>{order.date}</span>
-                <span>{order.itemCount} Items</span>
+                <span>{format(new Date(order.transaction_at), "MMM d, yyyy h:mm a")}</span>
+                <span>#TXN-{String(order.transaction_id).padStart(4, "0")}</span>
               </div>
 
               <div className="order-card-divider" />
 
               <div className="order-card-total">
                 <span>Total</span>
-                <span>{formatPeso(order.total)}</span>
+                <span>{formatPeso(order.total_amount)}</span>
               </div>
 
-              <button className="order-card-view" onClick={() => setSelectedOrder(order)}>
+              <button className="order-card-view" onClick={() => setSelectedOrderId(order.transaction_id)}>
                 View
               </button>
             </div>
@@ -257,7 +254,7 @@ export default function OrdersView() {
         </div>
       )}
 
-      {selectedOrder && <OrderDetailsModal order={selectedOrder} onClose={closeModal} />}
+      {selectedOrderId && <OrderDetailsModal orderId={selectedOrderId} onClose={closeModal} />}
     </>
   );
 }

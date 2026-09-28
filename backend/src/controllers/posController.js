@@ -4,7 +4,7 @@ const { getBranchById } = require('../models/branchModel');
 // POST /api/orders
 async function placeOrder(req, res, next) {
   try {
-    const { table_id, order_type, payment_method, items } = req.body;
+    const { table_id, order_type, payment_method, items, customer_name, guest_count } = req.body;
 
     // Cashiers can only order for their own branch; owner (rare, testing) must specify one
     const branch_id = req.user.role === 'cashier' ? req.user.branch_id : req.body.branch_id;
@@ -19,6 +19,8 @@ async function placeOrder(req, res, next) {
       table_id,
       order_type,
       payment_method,
+      customer_name,
+      guest_count,
       items,
     });
 
@@ -28,20 +30,18 @@ async function placeOrder(req, res, next) {
     next(err);
   }
 }
-
 // GET /api/orders
 async function listOrders(req, res, next) {
   try {
-    const { order_type, date } = req.query;
-    const branch_id = req.user.role === 'cashier' ? req.user.branch_id : req.query.branch_id;
+    const { order_type, date, search } = req.query;
+    const branch_id = req.user.role === "cashier" ? req.user.branch_id : req.query.branch_id;
 
-    const orders = await getOrdersFiltered({ branch_id, order_type, date });
+    const orders = await getOrdersFiltered({ branch_id, order_type, date, search });
     res.json(orders);
   } catch (err) {
     next(err);
   }
 }
-
 // GET /api/orders/:id
 async function getOrder(req, res, next) {
   try {
@@ -57,7 +57,6 @@ async function getOrder(req, res, next) {
     next(err);
   }
 }
-
 // GET /api/orders/:id/receipt
 async function getReceipt(req, res, next) {
   try {
@@ -72,6 +71,8 @@ async function getReceipt(req, res, next) {
       order_number: order.transaction_id,
       branch: order.branch_name,
       cashier: order.cashier_name,
+      customer_name: order.customer_name,
+      guest_count: order.guest_count,
       table_number: order.table_number,
       order_type: order.order_type,
       items: order.items,

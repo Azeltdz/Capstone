@@ -1,11 +1,11 @@
 const pool = require('../config/db');
+const TZ = "Asia/Manila";
 
-async function createOrderWithItems({ branch_id, cashier_id, table_id, order_type, payment_method, items }) {
+async function createOrderWithItems({ branch_id, cashier_id, table_id, order_type, payment_method, customer_name, guest_count, items }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1. Fetch menu items server-side — never trust price from the client
     const itemIds = items.map((i) => i.item_id);
     const { rows: menuItems } = await client.query(
       `SELECT item_id, item_name, selling_price, is_available FROM menu_items WHERE item_id = ANY($1::int[])`,
@@ -22,7 +22,6 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
       );
     }
 
-    // 2. Compute totals server-side
     let total_amount = 0;
     const itemsWithPrice = items.map((orderItem) => {
       const menuItem = menuItems.find((m) => m.item_id === orderItem.item_id);
@@ -30,8 +29,7 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
       total_amount += subtotal;
       return { ...orderItem, unit_price: menuItem.selling_price, subtotal };
     });
-
-    // 3. Deduct inventory via BOM, with row locks to prevent race conditions
+    // Deduct inventory via BOM, with row locks to prevent race conditions
     //    between two cashiers selling the last of an ingredient at once
     for (const orderItem of itemsWithPrice) {
       const { rows: bomRows } = await client.query(
@@ -69,8 +67,7 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
         );
       }
     }
-
-    // 4. If dine-in, lock and occupy the table
+  
     if (order_type === 'dine-in') {
       if (!table_id) {
         throw Object.assign(new Error('table_id is required for dine-in orders'), { statusCode: 400 });
@@ -88,16 +85,24 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
       await client.query(`UPDATE tables SET status = 'occupied' WHERE table_id = $1`, [table_id]);
     }
 
-    // 5. Insert the transaction
     const { rows: txRows } = await client.query(
-      `INSERT INTO transactions (branch_id, cashier_id, table_id, order_type, status, total_amount, payment_method, transaction_at)
-        VALUES ($1, $2, $3, $4, 'paid', $5, $6, NOW())
-       RETURNING *`,
-      [branch_id, cashier_id, order_type === 'dine-in' ? table_id : null, order_type, total_amount, payment_method]
+      `INSERT INTO transactions
+        (branch_id, cashier_id, table_id, order_type, status, total_amount, payment_method, customer_name, guest_count, transaction_at)
+      VALUES ($1, $2, $3, $4, 'paid', $5, $6, $7, $8, NOW())
+      RETURNING *`,
+      [
+        branch_id,
+        cashier_id,
+        order_type === "dine-in" ? table_id : null,
+        order_type,
+        total_amount,
+        payment_method,
+        customer_name || null,
+        guest_count || null,
+      ]
     );
     const transaction = txRows[0];
 
-    // 6. Insert transaction items
     for (const item of itemsWithPrice) {
       await client.query(
         `INSERT INTO transaction_items (transaction_id, item_id, quantity, unit_price, subtotal)
@@ -116,16 +121,26 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
   }
 }
 
-async function getOrdersFiltered({ branch_id, order_type, date }) {
+async function getOrdersFiltered({ branch_id, order_type, date, search }) {
   const conditions = [];
   const values = [];
   let i = 1;
 
   if (branch_id) { conditions.push(`t.branch_id = $${i++}`); values.push(branch_id); }
   if (order_type) { conditions.push(`t.order_type = $${i++}`); values.push(order_type); }
-  if (date) { conditions.push(`DATE(t.transaction_at) = $${i++}`); values.push(date); }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  if (date) {
+    conditions.push(`DATE(t.transaction_at AT TIME ZONE '${TZ}') = $${i++}`);
+    values.push(date);
+  }
+
+  if (search && search.trim()) {
+    const escaped = search.trim().replace(/[\\%_]/g, "\\$&");
+    conditions.push(`t.customer_name ILIKE $${i++}`);
+    values.push(`${escaped}%`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const { rows } = await pool.query(
     `SELECT t.*, u.full_name AS cashier_name, tb.table_number, b.branch_name

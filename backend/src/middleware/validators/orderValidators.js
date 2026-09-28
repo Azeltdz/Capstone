@@ -7,6 +7,8 @@ const validate = (req, res, next) => {
 };
 
 const placeOrderRules = [
+  body("customer_name").optional({ nullable: true }).isString().trim().isLength({ min: 1, max: 100 }).withMessage("customer_name must be 1-100 characters"),
+  body("guest_count").optional({ nullable: true }).isInt({ min: 1, max: 50 }).withMessage("guest_count must be between 1 and 50"),
   body('order_type').isIn(['dine-in', 'take-out', 'delivery']).withMessage('Invalid order_type'),
   body('payment_method').notEmpty().withMessage('payment_method is required'),
   body('items').isArray({ min: 1 }).withMessage('items must be a non-empty array'),
