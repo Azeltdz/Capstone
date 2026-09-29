@@ -13,6 +13,7 @@ router.get('/branches/:branchId/inventory/low-stock', protect, c.lowStockForBran
 router.post('/branches/:branchId/inventory', protect, requireRole('owner'), createInventoryRules, c.addInventoryEntry);
 
 // flat /inventory/:id + all-branch low-stock (owner only, used by dashboard/analytics)
+router.get('/inventory', protect, requireRole('owner'), c.listAllInventory);
 router.get('/inventory/low-stock', protect, requireRole('owner'), c.lowStockAllBranches);
 router.put('/inventory/:id', protect, requireRole('owner'), updateInventoryRules, c.editInventory);
 router.patch('/inventory/:id/adjust', protect, requireRole('owner'), adjustInventoryRules, c.adjustInventory);

@@ -12,6 +12,18 @@ async function getInventoryByBranch(branchId) {
   return rows;
 }
 
+async function getAllInventory() {
+  const { rows } = await pool.query(
+    `SELECT inv.*, ing.ingredient_name, ing.unit, ing.unit_cost, b.branch_name
+      FROM inventory inv
+      JOIN ingredients ing ON ing.ingredient_id = inv.ingredient_id
+      JOIN branches b ON b.branch_id = inv.branch_id
+      ORDER BY b.branch_name, ing.ingredient_name ASC`
+  );
+  return rows;
+}
+
+
 async function getInventoryById(id) {
   const { rows } = await pool.query(
     `SELECT inv.*, ing.ingredient_name, ing.unit, ing.unit_cost
@@ -95,5 +107,5 @@ async function deleteInventoryEntry(id) {
 module.exports = {
   getInventoryByBranch, getInventoryById, findInventoryEntry, createInventoryEntry,
   updateInventoryEntry, adjustInventoryQuantity, getLowStockByBranch, getLowStockAll,
-  deleteInventoryEntry,
+  deleteInventoryEntry, getAllInventory,
 };

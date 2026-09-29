@@ -1,7 +1,7 @@
 const {
   getInventoryByBranch, getInventoryById, findInventoryEntry, createInventoryEntry,
   updateInventoryEntry, adjustInventoryQuantity, getLowStockByBranch, getLowStockAll,
-  deleteInventoryEntry,
+  deleteInventoryEntry, getAllInventory
 } = require('../models/inventoryModel');
 const { getBranchById } = require('../models/branchModel');
 const { getIngredientById } = require('../models/ingredientModel');
@@ -24,6 +24,12 @@ async function listInventory(req, res, next) {
     if (!branch) return res.status(404).json({ message: 'Branch not found' });
 
     res.json(await getInventoryByBranch(branchId));
+  } catch (err) { next(err); }
+}
+
+async function listAllInventory(req, res, next) {
+  try {
+    res.json(await getAllInventory());
   } catch (err) { next(err); }
 }
 
@@ -103,6 +109,6 @@ async function removeInventoryEntry(req, res, next) {
 }
 
 module.exports = {
-  listInventory, lowStockForBranch, lowStockAllBranches,
+  listInventory, lowStockForBranch, lowStockAllBranches, listAllInventory,
   addInventoryEntry, editInventory, adjustInventory, removeInventoryEntry,
 };

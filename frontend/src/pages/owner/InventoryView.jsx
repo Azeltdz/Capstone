@@ -1,83 +1,73 @@
 // src/pages/owner/InventoryView.jsx
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState, useMemo } from "react";
+import { format } from "date-fns";
+import toast from "react-hot-toast";
+import { useBranches } from "../../hooks/useBranches";
 import {
-  BRANCHES,
-  getInventory,
-  createInventoryItem,
-  updateInventoryItem,
-  deleteInventoryItem,
-} from "../../api/mockInventory";
+  useInventoryList,
+  useLowStock,
+  useAddInventoryItem,
+  useUpdateInventoryItem,
+  useDeleteInventoryItem,
+} from "../../hooks/useInventory";
 
-const EMPTY_FORM = { branchId: "", name: "", unit: "", onHand: "", reorder: "" };
+const EMPTY_FORM = { branchId: "", name: "", unit: "", unitCost: "", onHand: "", reorder: "" };
 const UNIT_SUGGESTIONS = ["kg", "g", "L", "ml", "pcs", "pack", "bottle", "can", "sack"];
 
 export default function InventoryView() {
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [status, setStatus] = useState("all");
-  const [items, setItems] = useState([]);
-  const [lowStock, setLowStock] = useState([]);
-  const [loadState, setLoadState] = useState("loading"); // loading | ready | error
-  const [errorMsg, setErrorMsg] = useState("");
 
-  // Popups: "editing" is null (closed), "new" (adding), or the item being edited.
-  // "deleting" is null or the item waiting for delete confirmation.
-  const [editing, setEditing] = useState(null);
+  const { data: branches = [] } = useBranches();
+  const { data: items = [], isLoading, error } = useInventoryList(branch);
+  const { data: lowStock = [] } = useLowStock(branch);
+
+  const addItem = useAddInventoryItem();
+  const updateItem = useUpdateInventoryItem();
+  const deleteItem = useDeleteInventoryItem();
+
+  const [editing, setEditing] = useState(null); // null | "new" | item object
   const [deleting, setDeleting] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const debounceTimer = useRef(null);
-  useEffect(() => {
-    clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => setSearch(searchInput.trim()), 300);
-    return () => clearTimeout(debounceTimer.current);
-  }, [searchInput]);
-
-  // Ignore responses that arrive after a newer request was already sent.
-  const requestId = useRef(0);
-  const load = useCallback(async () => {
-    const myId = ++requestId.current;
-    setLoadState("loading");
-    try {
-      const data = await getInventory({ branch, status, search });
-      if (myId !== requestId.current) return;
-      setItems(data.items);
-      setLowStock(data.lowStock);
-      setLoadState("ready");
-    } catch (err) {
-      if (myId !== requestId.current) return;
-      setErrorMsg(err.message);
-      setLoadState("error");
-    }
-  }, [branch, status, search]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const filteredItems = useMemo(() => {
+    const term = searchInput.trim().toLowerCase();
+    return items.filter(
+      (i) =>
+        (status === "all" || i.status === status) &&
+        (term === "" || i.ingredient_name.toLowerCase().includes(term))
+    );
+  }, [items, status, searchInput]);
 
   function stockPercent(item) {
-    if (item.reorder <= 0) return 100;
-    const pct = (item.onHand / (item.reorder * 2)) * 100;
+    const onHand = Number(item.quantity_on_hand);
+    const reorder = Number(item.reorder_threshold);
+    if (reorder <= 0) return 100;
+    const pct = (onHand / (reorder * 2)) * 100;
     return Math.max(6, Math.min(100, pct));
   }
 
   // ---------- Add / Edit popup ----------
   function openAdd() {
-    setForm({ ...EMPTY_FORM, branchId: branch !== "all" ? branch : BRANCHES[0].id });
+    setForm({
+      ...EMPTY_FORM,
+      branchId: branch !== "all" ? branch : String(branches[0]?.branch_id ?? ""),
+    });
     setFormError("");
     setEditing("new");
   }
 
   function openEdit(item) {
     setForm({
-      branchId: item.branchId,
-      name: item.name,
+      branchId: String(item.branch_id),
+      name: item.ingredient_name,
       unit: item.unit,
-      onHand: String(item.onHand),
-      reorder: String(item.reorder),
+      unitCost: String(item.unit_cost ?? ""),
+      onHand: String(item.quantity_on_hand),
+      reorder: String(item.reorder_threshold),
     });
     setFormError("");
     setEditing(item);
@@ -92,10 +82,33 @@ export default function InventoryView() {
     setSaving(true);
     setFormError("");
     try {
-      if (editing === "new") await createInventoryItem(form);
-      else await updateInventoryItem(editing.id, form);
+      if (editing === "new") {
+        if (!form.branchId) throw new Error("Please choose a branch.");
+        if (!form.name.trim()) throw new Error("Ingredient name is required.");
+        if (!form.unit.trim()) throw new Error("Unit is required (e.g. kg, L, pcs).");
+        if (form.unitCost === "" || Number(form.unitCost) < 0) throw new Error("Cost per unit must be 0 or more.");
+        if (form.onHand === "" || Number(form.onHand) < 0) throw new Error("On hand must be 0 or more.");
+        if (form.reorder === "" || Number(form.reorder) < 0) throw new Error("Reorder level must be 0 or more.");
+
+        await addItem.mutateAsync({
+          branchId: Number(form.branchId),
+          name: form.name.trim(),
+          unit: form.unit.trim(),
+          unitCost: Number(form.unitCost),
+          onHand: Number(form.onHand),
+          reorder: Number(form.reorder),
+        });
+      } else {
+        if (form.onHand === "" || Number(form.onHand) < 0) throw new Error("On hand must be 0 or more.");
+        if (form.reorder === "" || Number(form.reorder) < 0) throw new Error("Reorder level must be 0 or more.");
+
+        await updateItem.mutateAsync({
+          id: editing.inventory_id,
+          quantity_on_hand: Number(form.onHand),
+          reorder_threshold: Number(form.reorder),
+        });
+      }
       setEditing(null);
-      await load();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -112,9 +125,8 @@ export default function InventoryView() {
     setSaving(true);
     setFormError("");
     try {
-      await deleteInventoryItem(deleting.id);
+      await deleteItem.mutateAsync(deleting.inventory_id);
       setDeleting(null);
-      await load();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -122,7 +134,8 @@ export default function InventoryView() {
     }
   }
 
-  const branchLabel = branch === "all" ? "All Branches" : BRANCHES.find((b) => b.id === branch)?.name;
+  const branchLabel =
+    branch === "all" ? "All Branches" : branches.find((b) => String(b.branch_id) === branch)?.branch_name || "…";
   const showBranchCol = branch === "all";
   const colCount = showBranchCol ? 9 : 8;
 
@@ -131,7 +144,9 @@ export default function InventoryView() {
       {lowStock.length > 0 && (
         <div className="alert-banner">
           ⚠ Low Stock Alert:{" "}
-          {lowStock.map((i) => (showBranchCol ? `${i.name} (${i.branchName})` : i.name)).join(", ")}{" "}
+          {lowStock
+            .map((i) => (showBranchCol ? `${i.ingredient_name} (${i.branch_name})` : i.ingredient_name))
+            .join(", ")}{" "}
           {lowStock.length === 1 ? "is" : "are"} at or below reorder level
         </div>
       )}
@@ -141,9 +156,9 @@ export default function InventoryView() {
         <div className="view-filters">
           <select className="select-input" value={branch} onChange={(e) => setBranch(e.target.value)}>
             <option value="all">All Branches</option>
-            {BRANCHES.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
+            {branches.map((b) => (
+              <option key={b.branch_id} value={String(b.branch_id)}>
+                {b.branch_name}
               </option>
             ))}
           </select>
@@ -181,32 +196,36 @@ export default function InventoryView() {
             </tr>
           </thead>
           <tbody>
-            {loadState === "loading" && (
+            {isLoading && (
               <tr>
                 <td colSpan={colCount} className="table-status">Loading inventory…</td>
               </tr>
             )}
-            {loadState === "error" && (
+            {error && (
               <tr>
-                <td colSpan={colCount} className="table-status table-status-error">Couldn't load inventory. {errorMsg}</td>
+                <td colSpan={colCount} className="table-status table-status-error">Couldn't load inventory. {error.message}</td>
               </tr>
             )}
-            {loadState === "ready" && items.length === 0 && (
+            {!isLoading && !error && filteredItems.length === 0 && (
               <tr>
                 <td colSpan={colCount} className="table-status">No ingredients match your filters.</td>
               </tr>
             )}
-            {loadState === "ready" &&
-              items.map((item) => (
-                <tr key={item.id}>
-                  <td className={item.status === "Low" ? "orange-text" : ""}>{item.name}</td>
-                  {showBranchCol && <td>{item.branchName}</td>}
+            {!isLoading &&
+              !error &&
+              filteredItems.map((item) => (
+                <tr key={item.inventory_id}>
+                  <td className={item.status === "Low" ? "orange-text" : ""}>{item.ingredient_name}</td>
+                  {showBranchCol && <td>{item.branch_name}</td>}
                   <td>{item.unit}</td>
-                  <td className={item.status === "Low" ? "orange-text" : "cell-strong"}>{item.onHand}</td>
-                  <td>{item.reorder}</td>
+                  <td className={item.status === "Low" ? "orange-text" : "cell-strong"}>{item.quantity_on_hand}</td>
+                  <td>{item.reorder_threshold}</td>
                   <td>
                     <div className="mini-bar-track">
-                      <div className={`mini-bar ${item.status === "Low" ? "orange" : "green"}`} style={{ width: `${stockPercent(item)}%` }} />
+                      <div
+                        className={`mini-bar ${item.status === "Low" ? "orange" : "green"}`}
+                        style={{ width: `${stockPercent(item)}%` }}
+                      />
                     </div>
                   </td>
                   <td>
@@ -214,7 +233,7 @@ export default function InventoryView() {
                       {item.status === "Low" ? "⚠ Low" : "Good"}
                     </span>
                   </td>
-                  <td>{item.updated}</td>
+                  <td>{format(new Date(item.last_updated), "MMM d, h:mm a")}</td>
                   <td>
                     <button className="btn btn-orange btn-sm" onClick={() => openEdit(item)}>Edit</button>{" "}
                     <button
@@ -235,12 +254,17 @@ export default function InventoryView() {
 
       <div className="table-footer">
         <span className="footer-note">
-          {loadState === "ready" ? items.length : "…"} ingredients shown · Auto-deducted via BOM on each transaction
+          {!isLoading ? filteredItems.length : "…"} ingredients shown · Auto-deducted via BOM on each transaction
         </span>
-        <button className="btn btn-green">🚚 Log Delivery / Restock</button>
+        <button
+          className="btn btn-green"
+          onClick={() => toast("Restock logging is coming soon — use Edit for now to update stock.")}
+        >
+          🚚 Log Delivery / Restock
+        </button>
       </div>
 
-      {/* Add / Edit popup (centered) */}
+      {/* Add / Edit popup */}
       {editing && (
         <div className="menu-backdrop" onClick={closeEditor}>
           <form className="menu-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSave}>
@@ -248,46 +272,74 @@ export default function InventoryView() {
 
             <label className="menu-field">
               Branch
-              <select
-                className="menu-input"
-                value={form.branchId}
-                onChange={(e) => setForm({ ...form, branchId: e.target.value })}
-              >
-                {BRANCHES.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+              {editing === "new" ? (
+                <select
+                  className="menu-input"
+                  value={form.branchId}
+                  onChange={(e) => setForm({ ...form, branchId: e.target.value })}
+                >
+                  {branches.map((b) => (
+                    <option key={b.branch_id} value={String(b.branch_id)}>
+                      {b.branch_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input className="menu-input" type="text" value={editing.branch_name} disabled />
+              )}
             </label>
 
             <label className="menu-field">
               Ingredient name
-              <input
-                className="menu-input"
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                autoFocus
-              />
+              {editing === "new" ? (
+                <input
+                  className="menu-input"
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  autoFocus
+                />
+              ) : (
+                <input className="menu-input" type="text" value={form.name} disabled />
+              )}
             </label>
 
             <label className="menu-field">
               Unit
-              <input
-                className="menu-input"
-                type="text"
-                list="inventory-units"
-                placeholder="kg, L, pcs…"
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value })}
-              />
-              <datalist id="inventory-units">
-                {UNIT_SUGGESTIONS.map((u) => (
-                  <option key={u} value={u} />
-                ))}
-              </datalist>
+              {editing === "new" ? (
+                <>
+                  <input
+                    className="menu-input"
+                    type="text"
+                    list="inventory-units"
+                    placeholder="kg, L, pcs…"
+                    value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  />
+                  <datalist id="inventory-units">
+                    {UNIT_SUGGESTIONS.map((u) => (
+                      <option key={u} value={u} />
+                    ))}
+                  </datalist>
+                </>
+              ) : (
+                <input className="menu-input" type="text" value={form.unit} disabled />
+              )}
             </label>
+
+            {editing === "new" && (
+              <label className="menu-field">
+                Cost per unit (₱)
+                <input
+                  className="menu-input"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={form.unitCost}
+                  onChange={(e) => setForm({ ...form, unitCost: e.target.value })}
+                />
+              </label>
+            )}
 
             <div className="menu-newcat">
               <label className="menu-field menu-newcat-name">
@@ -314,6 +366,13 @@ export default function InventoryView() {
               </label>
             </div>
 
+            {editing !== "new" && (
+              <p className="modal-muted" style={{ fontSize: "0.85em" }}>
+                Ingredient name, unit, and branch can't be changed here since this ingredient may be shared
+                across recipes and branches.
+              </p>
+            )}
+
             {formError && <p className="error-text">{formError}</p>}
 
             <div className="menu-modal-actions">
@@ -328,13 +387,14 @@ export default function InventoryView() {
         </div>
       )}
 
-      {/* Delete confirmation popup (centered) */}
+      {/* Delete confirmation popup */}
       {deleting && (
         <div className="menu-backdrop" onClick={closeDelete}>
           <div className="menu-modal" onClick={(e) => e.stopPropagation()}>
             <h3 className="panel-title">Delete inventory item?</h3>
             <p>
-              <strong>{deleting.name}</strong> ({deleting.branchName}) will be removed from inventory. This can't be undone.
+              <strong>{deleting.ingredient_name}</strong> ({deleting.branch_name}) will be removed from inventory.
+              This can't be undone.
             </p>
             {formError && <p className="error-text">{formError}</p>}
             <div className="menu-modal-actions">
