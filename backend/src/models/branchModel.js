@@ -40,4 +40,33 @@ async function updateBranch(id, { branch_name, location, contact_number, table_c
   return rows[0];
 }
 
-module.exports = { getAllBranches, getBranchById, createBranch, updateBranch };
+async function getBranchesWithStats() {
+  const { rows } = await pool.query(`
+    SELECT b.*,
+      (SELECT COUNT(*) FROM users u WHERE u.branch_id = b.branch_id AND u.is_active = true) AS staff_count,
+      COALESCE((
+        SELECT SUM(t.total_amount) FROM transactions t
+        WHERE t.branch_id = b.branch_id
+          AND DATE(t.transaction_at AT TIME ZONE 'Asia/Manila') = (NOW() AT TIME ZONE 'Asia/Manila')::date
+      ), 0) AS sales_today
+    FROM branches b
+    ORDER BY b.branch_name ASC
+  `);
+  return rows;
+}
+
+async function deleteBranchById(id) {
+  try {
+    const { rows } = await pool.query('DELETE FROM branches WHERE branch_id = $1 RETURNING *', [id]);
+    return rows[0];
+  } catch (err) {
+    if (err.code === '23503') {
+      const e = new Error('Cannot delete branch: it still has staff, tables, inventory, or transaction records.');
+      e.statusCode = 400;
+      throw e;
+    }
+    throw err;
+  }
+}
+
+module.exports = { getAllBranches, getBranchById, createBranch, updateBranch, getBranchesWithStats, deleteBranchById };

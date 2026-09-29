@@ -1,139 +1,133 @@
 // src/pages/owner/StaffView.jsx
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import StatCard from "../../components/StatCard";
+import { useAuth } from "../../context/AuthContext";
+import { useBranches } from "../../hooks/useBranches";
 import {
-  getStaffData,
-  addCashierAccount,
-  updateStaffAccount,
-  toggleStaffStatus,
-  getAssignableBranches,
-} from "../../api/mockOwner";
+  useStaffList,
+  useCreateStaff,
+  useUpdateStaff,
+  useDeactivateStaff,
+  useActivateStaff,
+} from "../../hooks/useStaff";
 
-const emptyAddForm = { name: "", username: "", password: "", branch: "" };
+const EMPTY_ADD_FORM = { full_name: "", user_name: "", password: "", role: "cashier", branch_id: "" };
 
 export default function StaffView() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [branchOptions, setBranchOptions] = useState([]);
+  const { user: currentUser } = useAuth();
+  const { data: staff = [], isLoading, error } = useStaffList();
+  const { data: branches = [] } = useBranches();
 
-  // Add-account popup
+  const createStaff = useCreateStaff();
+  const updateStaff = useUpdateStaff();
+  const deactivateStaff = useDeactivateStaff();
+  const activateStaff = useActivateStaff();
+
+  const activeBranches = useMemo(() => branches.filter((b) => b.is_active), [branches]);
+
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addForm, setAddForm] = useState(emptyAddForm);
+  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
   const [addError, setAddError] = useState("");
-  const [adding, setAdding] = useState(false);
 
-  // Edit popup
-  const [editingRow, setEditingRow] = useState(null); // the row object being edited, or null
-  const [editForm, setEditForm] = useState({ name: "", branch: "" });
+  const [editingRow, setEditingRow] = useState(null);
+  const [editForm, setEditForm] = useState({ full_name: "", role: "cashier", branch_id: "" });
   const [editError, setEditError] = useState("");
-  const [savingEdit, setSavingEdit] = useState(false);
 
-  // Which row's status toggle is in flight (disables just that button)
-  const [busyUsername, setBusyUsername] = useState(null);
+  const [busyId, setBusyId] = useState(null);
 
-  function reload() {
-    return getStaffData()
-      .then((d) => setData(d))
-      .catch((err) => setError(err.message));
+  function branchName(branchId) {
+    return branches.find((b) => b.branch_id === branchId)?.branch_name || "—";
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    getStaffData()
-      .then((d) => !cancelled && setData(d))
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Close whichever popup is open on Escape.
-  useEffect(() => {
-    if (!showAddModal && !editingRow) return;
-    function handleKey(e) {
-      if (e.key === "Escape") {
-        setShowAddModal(false);
-        setEditingRow(null);
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [showAddModal, editingRow]);
-
-  async function openAddModal() {
-    setAddForm(emptyAddForm);
+  function openAddModal() {
+    setAddForm({ ...EMPTY_ADD_FORM, branch_id: String(activeBranches[0]?.branch_id ?? "") });
     setAddError("");
     setShowAddModal(true);
-    try {
-      const branches = await getAssignableBranches();
-      setBranchOptions(branches);
-      setAddForm((f) => ({ ...f, branch: branches[0] || "" }));
-    } catch {
-      // popup still opens; user just won't have branch options until retried
-    }
   }
 
   async function handleAddSubmit(e) {
     e.preventDefault();
     setAddError("");
-    setAdding(true);
     try {
-      await addCashierAccount(addForm);
-      await reload();
+      if (!addForm.full_name.trim()) throw new Error("Full name is required.");
+      if (addForm.user_name.trim().length < 3) throw new Error("Username must be at least 3 characters.");
+      if (addForm.password.length < 6) throw new Error("Password must be at least 6 characters.");
+      if (addForm.role === "cashier" && !addForm.branch_id) throw new Error("Please choose a branch.");
+
+      await createStaff.mutateAsync({
+        full_name: addForm.full_name.trim(),
+        user_name: addForm.user_name.trim(),
+        password: addForm.password,
+        role: addForm.role,
+        ...(addForm.role === "cashier" ? { branch_id: Number(addForm.branch_id) } : {}),
+      });
       setShowAddModal(false);
-      setAddForm(emptyAddForm);
     } catch (err) {
       setAddError(err.message);
-    } finally {
-      setAdding(false);
     }
   }
 
-  async function openEdit(row) {
+  function openEdit(row) {
     setEditingRow(row);
-    setEditForm({ name: row.name, branch: row.branch });
+    setEditForm({
+      full_name: row.full_name,
+      role: row.role,
+      branch_id: activeBranches.some((b) => b.branch_id === row.branch_id)
+        ? String(row.branch_id)
+        : String(activeBranches[0]?.branch_id ?? ""),
+    });
     setEditError("");
-    try {
-      const branches = await getAssignableBranches();
-      // Keep the staff member's current branch selectable even if it were
-      // ever deactivated after they were assigned to it.
-      setBranchOptions(Array.from(new Set([...branches, row.branch])));
-    } catch {
-      setBranchOptions([row.branch]);
-    }
+  }
+
+  function handleEditRoleChange(newRole) {
+    setEditForm((prev) => ({
+      ...prev,
+      role: newRole,
+      branch_id:
+        newRole === "cashier" && !prev.branch_id
+          ? String(activeBranches[0]?.branch_id ?? "")
+          : prev.branch_id,
+    }));
   }
 
   async function handleEditSubmit(e) {
     e.preventDefault();
     setEditError("");
-    setSavingEdit(true);
     try {
-      await updateStaffAccount(editingRow.username, editForm);
-      await reload();
+      if (!editForm.full_name.trim()) throw new Error("Full name is required.");
+      if (editForm.role === "cashier" && !editForm.branch_id) throw new Error("Please choose a branch.");
+
+      await updateStaff.mutateAsync({
+        id: editingRow.user_id,
+        full_name: editForm.full_name.trim(),
+        role: editForm.role,
+        branch_id: editForm.role === "cashier" ? Number(editForm.branch_id) : null,
+      });
       setEditingRow(null);
     } catch (err) {
       setEditError(err.message);
-    } finally {
-      setSavingEdit(false);
     }
   }
 
   async function handleToggleStatus(row) {
-    setBusyUsername(row.username);
+    setBusyId(row.user_id);
     try {
-      await toggleStaffStatus(row.username);
-      await reload();
+      if (row.is_active) await deactivateStaff.mutateAsync(row.user_id);
+      else await activateStaff.mutateAsync(row.user_id);
     } catch (err) {
-      setError(err.message);
+      setEditError(err.message);
     } finally {
-      setBusyUsername(null);
+      setBusyId(null);
     }
   }
 
-  if (error) return <p className="error-text">Couldn't load staff. {error}</p>;
-  if (!data) return <p className="loading-text">Loading staff…</p>;
+  if (error) return <p className="error-text">Couldn't load staff. {error.message}</p>;
+  if (isLoading) return <p className="loading-text">Loading staff…</p>;
 
-  const { stats, rows } = data;
+  const total = staff.length;
+  const activeAccounts = staff.filter((s) => s.is_active).length;
+  const roles = [...new Set(staff.map((s) => (s.role === "owner" ? "Owner" : "Cashier")))].join(", ");
+  const branchCount = new Set(staff.filter((s) => s.branch_id).map((s) => s.branch_id)).size;
 
   return (
     <>
@@ -145,9 +139,9 @@ export default function StaffView() {
       </div>
 
       <div className="stat-grid stat-grid-3">
-        <StatCard label="Total Staff" value={stats.total} change="Across 2 branches" changeType="muted" />
-        <StatCard label="Active Accounts" value={stats.activeAccounts} change="All accounts active" changeType="up" />
-        <StatCard label="Roles" value={stats.roles} valueClassName="stat-value-sm" />
+        <StatCard label="Total Staff" value={total} change={`Across ${branchCount} branches`} changeType="muted" />
+        <StatCard label="Active Accounts" value={activeAccounts} change={`${total - activeAccounts} deactivated`} changeType="up" />
+        <StatCard label="Roles" value={roles} valueClassName="stat-value-sm" />
       </div>
 
       <div className="table-wrap">
@@ -163,70 +157,68 @@ export default function StaffView() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.username} className={row.isAdmin ? "row-highlight" : ""}>
-                <td className="cell-strong">{row.name}</td>
-                <td className="mono">{row.username}</td>
-                <td>{row.branch}</td>
-                <td>
-                  <span className={`badge ${row.isAdmin ? "badge-admin" : "badge-cashier"}`}>{row.role}</span>
-                </td>
-                <td>
-                  <span className={`badge ${row.status === "Active" ? "badge-good" : "badge-flag"}`}>{row.status}</span>
-                </td>
-                <td>
-                  {row.isAdmin ? (
-                    <span className="muted-cell">—</span>
-                  ) : (
-                    <>
-                      <button className="action-link" onClick={() => openEdit(row)}>
-                        Edit
-                      </button>{" "}
-                      <button
-                        className="action-link action-danger"
-                        disabled={busyUsername === row.username}
-                        onClick={() => handleToggleStatus(row)}
-                      >
-                        {busyUsername === row.username ? "…" : row.status === "Active" ? "Deactivate" : "Activate"}
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {staff.map((row) => {
+              const isSelf = row.user_id === currentUser.user_id;
+              return (
+                <tr key={row.user_id} className={row.role === "owner" ? "row-highlight" : ""}>
+                  <td className="cell-strong">{row.full_name}</td>
+                  <td className="mono">{row.user_name}</td>
+                  <td>{row.branch_id ? branchName(row.branch_id) : "—"}</td>
+                  <td>
+                    <span className={`badge ${row.role === "owner" ? "badge-admin" : "badge-cashier"}`}>
+                      {row.role === "owner" ? "Owner" : "Cashier"}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`badge ${row.is_active ? "badge-good" : "badge-flag"}`}>
+                      {row.is_active ? "Active" : "Deactivated"}
+                    </span>
+                  </td>
+                  <td>
+                    {isSelf ? (
+                      <span className="muted-cell">— (you)</span>
+                    ) : (
+                      <>
+                        <button className="action-link" onClick={() => openEdit(row)}>
+                          Edit
+                        </button>{" "}
+                        <button
+                          className="action-link action-danger"
+                          disabled={busyId === row.user_id}
+                          onClick={() => handleToggleStatus(row)}
+                        >
+                          {busyId === row.user_id ? "…" : row.is_active ? "Deactivate" : "Activate"}
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
       <span className="footer-note">
-        Showing {rows.length} of {rows.length} staff accounts · Deactivated accounts preserve transaction history
+        Showing {staff.length} staff accounts · Deactivated accounts preserve transaction history
       </span>
 
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => !adding && setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Add Cashier Account</h3>
-              <button
-                type="button"
-                className="modal-close"
-                aria-label="Close"
-                onClick={() => !adding && setShowAddModal(false)}
-              >
-                ×
+              <h3 className="modal-title">Add Staff Account</h3>
+              <button type="button" className="modal-close" aria-label="Close" onClick={() => setShowAddModal(false)}>
+                X
               </button>
             </div>
             <form onSubmit={handleAddSubmit} className="modal-body">
               <label className="form-row">
                 Full Name
-                <input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} required />
+                <input value={addForm.full_name} onChange={(e) => setAddForm({ ...addForm, full_name: e.target.value })} required />
               </label>
               <label className="form-row">
                 Username
-                <input
-                  value={addForm.username}
-                  onChange={(e) => setAddForm({ ...addForm, username: e.target.value })}
-                  required
-                />
+                <input value={addForm.user_name} onChange={(e) => setAddForm({ ...addForm, user_name: e.target.value })} required />
               </label>
               <label className="form-row">
                 Password
@@ -239,25 +231,38 @@ export default function StaffView() {
                 />
               </label>
               <label className="form-row">
-                Branch
-                <select value={addForm.branch} onChange={(e) => setAddForm({ ...addForm, branch: e.target.value })} required>
-                  {branchOptions.length === 0 && <option value="">No active branches</option>}
-                  {branchOptions.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
+                Role
+                <select value={addForm.role} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })}>
+                  <option value="cashier">Cashier</option>
+                  <option value="owner">Owner</option>
                 </select>
               </label>
+              {addForm.role === "cashier" && (
+                <label className="form-row">
+                  Branch
+                  <select value={addForm.branch_id} onChange={(e) => setAddForm({ ...addForm, branch_id: e.target.value })} required>
+                    {activeBranches.length === 0 && <option value="">No active branches</option>}
+                    {activeBranches.map((b) => (
+                      <option key={b.branch_id} value={String(b.branch_id)}>
+                        {b.branch_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {addError && <p className="form-error">{addError}</p>}
 
               <div className="form-actions">
-                <button type="button" className="btn" onClick={() => setShowAddModal(false)} disabled={adding}>
+                <button type="button" className="btn" onClick={() => setShowAddModal(false)} disabled={createStaff.isPending}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-navy" disabled={adding || branchOptions.length === 0}>
-                  {adding ? "Creating…" : "Create Account"}
+                <button
+                  type="submit"
+                  className="btn btn-navy"
+                  disabled={createStaff.isPending || (addForm.role === "cashier" && activeBranches.length === 0)}
+                >
+                  {createStaff.isPending ? "Creating…" : "Create Account"}
                 </button>
               </div>
             </form>
@@ -266,43 +271,47 @@ export default function StaffView() {
       )}
 
       {editingRow && (
-        <div className="modal-overlay" onClick={() => !savingEdit && setEditingRow(null)}>
+        <div className="modal-overlay" onClick={() => setEditingRow(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit {editingRow.name}</h3>
-              <button
-                type="button"
-                className="modal-close"
-                aria-label="Close"
-                onClick={() => !savingEdit && setEditingRow(null)}
-              >
-                ×
+              <h3 className="modal-title">Edit {editingRow.full_name}</h3>
+              <button type="button" className="modal-close" aria-label="Close" onClick={() => setEditingRow(null)}>
+                X
               </button>
             </div>
             <form onSubmit={handleEditSubmit} className="modal-body">
               <label className="form-row">
                 Full Name
-                <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} required />
+                <input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} required />
               </label>
               <label className="form-row">
-                Branch
-                <select value={editForm.branch} onChange={(e) => setEditForm({ ...editForm, branch: e.target.value })} required>
-                  {branchOptions.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
+                Role
+                <select value={editForm.role} onChange={(e) => handleEditRoleChange(e.target.value)}>
+                  <option value="cashier">Cashier</option>
+                  <option value="owner">Owner</option>
                 </select>
               </label>
+              {editForm.role === "cashier" && (
+                <label className="form-row">
+                  Branch
+                  <select value={editForm.branch_id} onChange={(e) => setEditForm({ ...editForm, branch_id: e.target.value })} required>
+                    {activeBranches.map((b) => (
+                      <option key={b.branch_id} value={String(b.branch_id)}>
+                        {b.branch_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {editError && <p className="form-error">{editError}</p>}
 
               <div className="form-actions">
-                <button type="button" className="btn" onClick={() => setEditingRow(null)} disabled={savingEdit}>
+                <button type="button" className="btn" onClick={() => setEditingRow(null)} disabled={updateStaff.isPending}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-navy" disabled={savingEdit}>
-                  {savingEdit ? "Saving…" : "Save Changes"}
+                <button type="submit" className="btn btn-navy" disabled={updateStaff.isPending}>
+                  {updateStaff.isPending ? "Saving…" : "Save Changes"}
                 </button>
               </div>
             </form>

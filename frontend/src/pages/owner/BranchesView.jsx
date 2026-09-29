@@ -1,54 +1,37 @@
 // src/pages/owner/BranchesView.jsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
-  getBranchesData,
-  createBranch,
-  updateBranch,
-  deactivateBranch,
-  reactivateBranch,
-  deleteBranch,
-} from "../../api/mockOwner";
+  useBranchesSummary,
+  useCreateBranch,
+  useUpdateBranch,
+  useDeleteBranch,
+} from "../../hooks/useBranches";
 
-const EMPTY_FORM = { name: "", location: "", contact: "" };
+const EMPTY_FORM = { branch_name: "", location: "", contact_number: "" };
+
+function statusFor(branch) {
+  if (!branch.is_active) return { label: "Deactivated", badgeClass: "badge-muted" };
+  if (branch.flagged) return { label: "Flagged", badgeClass: "badge-warn" };
+  return { label: "Active", badgeClass: "badge-good" };
+}
 
 export default function BranchesView() {
-  const [branches, setBranches] = useState(null);
-  const [error, setError] = useState("");
+  const { data: branches = [], isLoading, error } = useBranchesSummary();
+  const createBranch = useCreateBranch();
+  const updateBranch = useUpdateBranch();
+  const deleteBranch = useDeleteBranch();
 
-  // ---- Add/Edit modal + form state ----
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null); // null = "Add Branch" mode, otherwise the branch id being edited
-  const [editingStaffCount, setEditingStaffCount] = useState(0); // read-only, shown in the Edit modal only
+  const [editingId, setEditingId] = useState(null);
+  const [editingStaffCount, setEditingStaffCount] = useState(0);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // ---- Deactivate/Delete confirmation popup state ----
-  // deleteTarget is the branch the popup refers to; the popup's copy and
-  // action (deactivate vs. permanently delete) are derived from whether
-  // that branch is already deactivated.
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [reactivatingId, setReactivatingId] = useState(null);
-
-  function loadBranches() {
-    return getBranchesData()
-      .then((d) => setBranches(d))
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    getBranchesData()
-      .then((d) => !cancelled && setBranches(d))
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // ---------------- Add / Edit modal ----------------
 
   function openAddModal() {
     setEditingId(null);
@@ -59,20 +42,19 @@ export default function BranchesView() {
   }
 
   function openEditModal(branch) {
-    setEditingId(branch.id);
-    setEditingStaffCount(branch.staffCount);
+    setEditingId(branch.branch_id);
+    setEditingStaffCount(branch.staff_count);
     setForm({
-      name: branch.name,
-      location: branch.location,
-      contact: branch.contact,
+      branch_name: branch.branch_name,
+      location: branch.location || "",
+      contact_number: branch.contact_number || "",
     });
     setFormError("");
     setModalOpen(true);
   }
 
   function closeModal() {
-    if (saving) return; // don't let a backdrop click cut off an in-flight save
-    setModalOpen(false);
+    if (!saving) setModalOpen(false);
   }
 
   function handleFormChange(field, value) {
@@ -84,12 +66,12 @@ export default function BranchesView() {
     setFormError("");
     setSaving(true);
     try {
+      if (!form.branch_name.trim()) throw new Error("Branch name is required.");
       if (editingId == null) {
-        await createBranch(form);
+        await createBranch.mutateAsync(form);
       } else {
-        await updateBranch(editingId, form);
+        await updateBranch.mutateAsync({ id: editingId, ...form });
       }
-      await loadBranches();
       setModalOpen(false);
     } catch (err) {
       setFormError(err.message);
@@ -98,16 +80,13 @@ export default function BranchesView() {
     }
   }
 
-  // ---------------- Deactivate / Delete popup ----------------
-
   function openDeleteConfirm(branch) {
     setDeleteError("");
     setDeleteTarget(branch);
   }
 
   function closeDeleteConfirm() {
-    if (deleteBusy) return;
-    setDeleteTarget(null);
+    if (!deleteBusy) setDeleteTarget(null);
   }
 
   async function confirmDeleteAction() {
@@ -115,16 +94,13 @@ export default function BranchesView() {
     setDeleteBusy(true);
     setDeleteError("");
     try {
-      if (!deleteTarget.deactivated) {
-        // Step 1: deactivate. The branch stays in the list (now shown as
-        // "Deactivated") — it is NOT removed yet.
-        await deactivateBranch(deleteTarget.id);
+      if (deleteTarget.is_active) {
+        // Step 1: deactivate only
+        await updateBranch.mutateAsync({ id: deleteTarget.branch_id, is_active: false });
       } else {
-        // Step 2: the branch was already deactivated, so this confirm
-        // actually removes it for good.
-        await deleteBranch(deleteTarget.id);
+        // Step 2: already deactivated -> attempt permanent delete
+        await deleteBranch.mutateAsync(deleteTarget.branch_id);
       }
-      await loadBranches();
       setDeleteTarget(null);
     } catch (err) {
       setDeleteError(err.message);
@@ -134,22 +110,18 @@ export default function BranchesView() {
   }
 
   async function handleReactivate(branch) {
-    setReactivatingId(branch.id);
-    setError("");
+    setReactivatingId(branch.branch_id);
     try {
-      await reactivateBranch(branch.id);
-      await loadBranches();
-    } catch (err) {
-      setError(err.message);
+      await updateBranch.mutateAsync({ id: branch.branch_id, is_active: true });
     } finally {
       setReactivatingId(null);
     }
   }
 
-  if (error) return <p className="error-text">Couldn't load branches. {error}</p>;
-  if (!branches) return <p className="loading-text">Loading branches…</p>;
+  if (error) return <p className="error-text">Couldn't load branches. {error.message}</p>;
+  if (isLoading) return <p className="loading-text">Loading branches…</p>;
 
-  const activeCount = branches.filter((b) => !b.deactivated).length;
+  const activeCount = branches.filter((b) => b.is_active).length;
 
   return (
     <>
@@ -162,48 +134,47 @@ export default function BranchesView() {
 
       <div className="branch-grid">
         {branches.map((b) => {
-          const cardClass = b.deactivated
+          const { label, badgeClass } = statusFor(b);
+          const cardClass = !b.is_active
             ? "branch-card-deactivated"
             : b.flagged
             ? "branch-card-flag"
             : "branch-card-main";
-          const badgeClass = b.deactivated ? "badge-muted" : b.flagged ? "badge-flag" : "badge-good";
-          const statusBadgeClass = b.deactivated ? "badge-muted" : b.flagged ? "badge-warn" : "badge-good";
 
           return (
-            <div className={`branch-card ${cardClass}`} key={b.id}>
+            <div className={`branch-card ${cardClass}`} key={b.branch_id}>
               <div className="branch-card-header">
-                <h3>{b.name}</h3>
-                <span className={`badge ${badgeClass}`}>{b.tag}</span>
+                <h3>{b.branch_name}</h3>
+                <span className={`badge ${badgeClass}`}>{label}</span>
               </div>
               <p className="branch-location">{b.location}</p>
               <div className="branch-row">
                 <span>Staff count</span>
-                <strong>{b.staffCount}</strong>
+                <strong>{b.staff_count}</strong>
               </div>
               <div className="branch-row">
                 <span>Status</span>
-                <span className={`badge ${statusBadgeClass}`}>{b.status}</span>
+                <span className={`badge ${badgeClass}`}>{label}</span>
               </div>
               <div className="branch-row">
                 <span>Today's sales</span>
-                <strong className={b.flagged && !b.deactivated ? "orange-text" : "green-text"}>
-                  ₱{b.sales.toLocaleString()}
+                <strong className={b.flagged && b.is_active ? "orange-text" : "green-text"}>
+                  ₱{Number(b.sales_today).toLocaleString()}
                 </strong>
               </div>
               <div className="branch-row">
                 <span>Contact</span>
-                <strong>{b.contact}</strong>
+                <strong>{b.contact_number || "—"}</strong>
               </div>
 
               <div className="branch-card-actions">
-                {!b.deactivated ? (
+                {b.is_active ? (
                   <>
                     <button className="btn btn-outline btn-block" onClick={() => openEditModal(b)}>
                       Edit Branch
                     </button>
                     <button className="btn btn-danger-outline btn-block" onClick={() => openDeleteConfirm(b)}>
-                      Delete
+                      Deactivate
                     </button>
                   </>
                 ) : (
@@ -211,9 +182,9 @@ export default function BranchesView() {
                     <button
                       className="btn btn-outline btn-block"
                       onClick={() => handleReactivate(b)}
-                      disabled={reactivatingId === b.id}
+                      disabled={reactivatingId === b.branch_id}
                     >
-                      {reactivatingId === b.id ? "Reactivating…" : "Reactivate"}
+                      {reactivatingId === b.branch_id ? "Reactivating…" : "Reactivate"}
                     </button>
                     <button className="btn btn-danger-outline btn-block" onClick={() => openDeleteConfirm(b)}>
                       Delete Permanently
@@ -226,15 +197,12 @@ export default function BranchesView() {
         })}
       </div>
 
-      {/* ---------------- Add / Edit Branch modal ---------------- */}
       {modalOpen && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{editingId == null ? "Add New Branch" : `Edit ${form.name || "Branch"}`}</h3>
-              <button type="button" className="modal-close" onClick={closeModal} aria-label="Close">
-                ×
-              </button>
+              <h3>{editingId == null ? "Add New Branch" : `Edit ${form.branch_name || "Branch"}`}</h3>
+              <button type="button" className="modal-close" onClick={closeModal} aria-label="Close">×</button>
             </div>
 
             <form onSubmit={handleSubmit}>
@@ -246,8 +214,8 @@ export default function BranchesView() {
                   <input
                     id="branch-name"
                     type="text"
-                    value={form.name}
-                    onChange={(e) => handleFormChange("name", e.target.value)}
+                    value={form.branch_name}
+                    onChange={(e) => handleFormChange("branch_name", e.target.value)}
                     placeholder="e.g. Alangilan"
                     autoFocus
                     required
@@ -282,8 +250,8 @@ export default function BranchesView() {
                   <input
                     id="branch-contact"
                     type="text"
-                    value={form.contact}
-                    onChange={(e) => handleFormChange("contact", e.target.value)}
+                    value={form.contact_number}
+                    onChange={(e) => handleFormChange("contact_number", e.target.value)}
                     placeholder="09XX-XXX-XXXX"
                   />
                 </div>
@@ -297,30 +265,28 @@ export default function BranchesView() {
         </div>
       )}
 
-      {/* ---------------- Deactivate / Delete confirmation popup ---------------- */}
       {deleteTarget && (
         <div className="modal-overlay" onClick={closeDeleteConfirm}>
           <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{deleteTarget.deactivated ? "Delete branch permanently?" : "Deactivate branch?"}</h3>
-              <button type="button" className="modal-close" onClick={closeDeleteConfirm} aria-label="Close">
-                ×
-              </button>
+              <h3>{!deleteTarget.is_active ? "Delete branch permanently?" : "Deactivate branch?"}</h3>
+              <button type="button" className="modal-close" onClick={closeDeleteConfirm} aria-label="Close">×</button>
             </div>
 
             <div className="modal-body">
               {deleteError && <p className="error-text">{deleteError}</p>}
 
-              {!deleteTarget.deactivated ? (
+              {deleteTarget.is_active ? (
                 <p>
-                  <strong>{deleteTarget.name}</strong> will be marked <strong>Deactivated</strong> and hidden from
-                  normal operations. It won't be permanently removed — you can reactivate it later, or delete it for
-                  good once it's deactivated.
+                  <strong>{deleteTarget.branch_name}</strong> will be marked <strong>Deactivated</strong> and hidden
+                  from normal operations. It won't be permanently removed — you can reactivate it later, or delete it
+                  for good once it's deactivated.
                 </p>
               ) : (
                 <p>
-                  <strong>{deleteTarget.name}</strong> is already deactivated. This will permanently delete it and
-                  its record. <strong>This can't be undone.</strong>
+                  <strong>{deleteTarget.branch_name}</strong> is already deactivated. This will permanently delete it
+                  and its record — but only if it has no staff, tables, inventory, or transaction history.
+                  <strong> This can't be undone.</strong>
                 </p>
               )}
 
@@ -328,17 +294,8 @@ export default function BranchesView() {
                 <button type="button" className="btn btn-outline btn-block" onClick={closeDeleteConfirm} disabled={deleteBusy}>
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-block"
-                  onClick={confirmDeleteAction}
-                  disabled={deleteBusy}
-                >
-                  {deleteBusy
-                    ? "Working…"
-                    : deleteTarget.deactivated
-                    ? "Delete Permanently"
-                    : "Deactivate Branch"}
+                <button type="button" className="btn btn-danger btn-block" onClick={confirmDeleteAction} disabled={deleteBusy}>
+                  {deleteBusy ? "Working…" : !deleteTarget.is_active ? "Delete Permanently" : "Deactivate Branch"}
                 </button>
               </div>
             </div>
