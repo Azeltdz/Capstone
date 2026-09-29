@@ -32,7 +32,11 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.message || `Request failed (${res.status})`, res.status);
+    const message =
+      body.message ||
+      (Array.isArray(body.errors) && body.errors.map((e) => e.msg).join(" ")) ||
+      `Request failed (${res.status})`;
+    throw new ApiError(message, res.status);
   }
 
   const text = await res.text();

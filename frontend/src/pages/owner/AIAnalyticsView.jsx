@@ -1,6 +1,4 @@
 // src/pages/owner/AIAnalyticsView.jsx
-//
-// Requires: npm install react-chartjs-2 chart.js lucide-react
 import { useEffect, useState } from "react";
 import { Bar } from "react-chartjs-2";
 import {

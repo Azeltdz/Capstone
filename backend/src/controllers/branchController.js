@@ -7,9 +7,10 @@ const {
   deleteBranchById
 } = require('../models/branchModel');
 const { getTablesByBranch } = require('../models/tableModel');
-const { getDailyTransactionCounts } = require('../models/analyticsModel');
 const { getAllSystemSettings } = require('../models/settingsModel');
 const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
+const { getBranchPaceStats } = require('../models/analyticsModel');
+const { evaluatePace } = require('../utils/anomaly');
 
 // GET /api/branches
 async function listBranches(req, res, next) {
@@ -88,19 +89,12 @@ async function listBranchesWithStats(req, res, next) {
     const windowDays = Number(moving_average_window);
     const anomalyThreshold = Number(anomaly_threshold);
 
-    const branches = await Promise.all(
-      stats.map(async (b) => {
-        const series = await getDailyTransactionCounts(b.branch_id, windowDays);
-        const movingAvg = series.reduce((a, c) => a + c, 0) / windowDays;
-        const today = series[series.length - 1];
-        let flagged = false;
-        if (movingAvg > 0) {
-          flagged = ((movingAvg - today) / movingAvg) * 100 >= anomalyThreshold;
-        }
-        return { ...b, flagged };
-      })
-    );
-
+    const pace = await getBranchPaceStats(windowDays);
+    const paceById = Object.fromEntries(pace.map((p) => [p.branch_id, p]));
+    const branches = stats.map((b) => ({
+      ...b,
+      flagged: paceById[b.branch_id] ? evaluatePace(paceById[b.branch_id], anomalyThreshold).flagged : false,
+    }));
     res.json(branches);
   } catch (err) { next(err); }
 }

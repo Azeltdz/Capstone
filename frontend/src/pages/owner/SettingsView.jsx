@@ -1,241 +1,304 @@
 // src/pages/owner/SettingsView.jsx
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import toast from "react-hot-toast";
+import { useBranches } from "../../hooks/useBranches";
 import {
-  getSettingsData,
-  getDefaultSettings,
-  updateAnalyticsSettings,
-  updateReceiptSettings,
-  updateInventoryAlertSettings,
-} from "../../api/mockOwner";
+  useSettings, useUpdateSettings, useSecurityStatus, useReceiptSettings, useUpdateReceiptSettings,
+} from "../../hooks/useSettings";
+import { ANALYTICS_DEFAULTS, INVENTORY_ALERT_DEFAULTS, RECEIPT_DEFAULTS } from "../../constant/settingsDefaults";
 
-const SAVE_STATUS = { IDLE: "idle", SAVING: "saving", SAVED: "saved", ERROR: "error" };
+// ---------- Validation (mirrors the backend's express-validator rules) ----------
+// Inputs stay strings in the form; converted to numbers only when sending.
+const numericString = ({ label, min, max, integer = false }) =>
+  z
+    .string()
+    .trim()
+    .min(1, `${label} is required`)
+    .refine((v) => Number.isFinite(Number(v)), `${label} must be a number`)
+    .refine((v) => !integer || Number.isInteger(Number(v)), `${label} must be a whole number`)
+    .refine(
+      (v) => Number(v) >= min && (max === undefined || Number(v) <= max),
+      max === undefined ? `${label} must be at least ${min}` : `${label} must be between ${min} and ${max}`
+    );
 
-// One entry here per editable panel. `section` is the key both in
-// `settings` state and in the object getDefaultSettings() returns, so
-// wiring a new settings panel later is just adding a row to this array —
-// the save/restore handlers, buttons, and status tracking are all generic.
-const SETTINGS_PANELS = [
-  { section: "analytics", updateFn: updateAnalyticsSettings, saveLabel: "Save Analytics Settings" },
-  { section: "receipt", updateFn: updateReceiptSettings, saveLabel: "Save Receipt Settings" },
-  { section: "inventoryAlerts", updateFn: updateInventoryAlertSettings, saveLabel: "Save Alert Settings" },
-];
+const analyticsSchema = z.object({
+  moving_average_window: numericString({ label: "Moving average window", min: 1, max: 30, integer: true }),
+  trend_threshold: numericString({ label: "Trend threshold", min: 0, max: 100 }),
+  anomaly_threshold: numericString({ label: "Anomaly threshold", min: 0, max: 100 }),
+});
 
-export default function SettingsView() {
-  const [settings, setSettings] = useState(null);
-  const [error, setError] = useState("");
-  // One entry per panel/action: { "analytics-save": {status}, "analytics-restore": {status}, ... }
-  // Save and Restore get separate keys so clicking one doesn't show a
-  // "Saving…" state on the other button.
-  const [actionStatus, setActionStatus] = useState({});
+const inventoryAlertSchema = z.object({
+  low_stock_default_kg: numericString({ label: "Low-stock level (kg)", min: 0 }),
+  low_stock_default_pcs: numericString({ label: "Low-stock level (pcs)", min: 0 }),
+});
 
-  useEffect(() => {
-    let cancelled = false;
-    getSettingsData()
-      .then((d) => !cancelled && setSettings(d))
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+const receiptSchema = z.object({
+  business_name: z.string().trim().min(1, "Business name is required").max(100, "Keep it under 100 characters"),
+  footer_message: z.string().trim().max(200, "Keep it under 200 characters"),
+});
 
-  if (error) return <p className="error-text">Couldn't load settings. {error}</p>;
-  if (!settings) return <p className="loading-text">Loading settings…</p>;
+// Server value if present, otherwise the default. Guards against a backend that
+// hasn't been restarted yet (new keys would be undefined).
+function withDefaults(source, defaults) {
+  return Object.fromEntries(Object.keys(defaults).map((k) => [k, String(source?.[k] ?? defaults[k])]));
+}
 
-  function updateField(section, field, value) {
-    setSettings((prev) => ({ ...prev, [section]: { ...prev[section], [field]: value } }));
-  }
+// ---------- Small shared pieces (module level, so they aren't recreated every render) ----------
+function TextField({ id, label, hint, error, registration, type = "text", ...inputProps }) {
+  return (
+    <>
+      <label className="form-label" htmlFor={id}>{label}</label>
+      <input id={id} type={type} className="form-input" aria-invalid={!!error} {...registration} {...inputProps} />
+      {error ? (
+        <p className="error-text" role="alert">{error}</p>
+      ) : hint ? (
+        <p className="form-hint">{hint}</p>
+      ) : null}
+    </>
+  );
+}
 
-  // Shared saving/saved/error lifecycle for both Save and Restore buttons.
-  async function runAction(actionKey, fn) {
-    setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.SAVING } }));
+function PanelActions({ isDirty, isSaving, saveLabel, onRestore }) {
+  return (
+    <div className="settings-actions" style={{ display: "flex", gap: 8 }}>
+      <button type="submit" className="btn btn-navy btn-block" disabled={!isDirty || isSaving}>
+        {isSaving ? "Saving…" : saveLabel}
+      </button>
+      <button type="button" className="btn btn-block" onClick={onRestore} disabled={isSaving}>
+        Restore Defaults
+      </button>
+    </div>
+  );
+}
+
+// ---------- Panels ----------
+function AnalyticsPanel({ settings }) {
+  const update = useUpdateSettings();
+  const {
+    register, handleSubmit, reset, watch,
+    formState: { errors, isDirty },
+  } = useForm({
+    resolver: zodResolver(analyticsSchema),
+    defaultValues: withDefaults(settings, ANALYTICS_DEFAULTS),
+  });
+
+  const trend = watch("trend_threshold");
+  const anomaly = watch("anomaly_threshold");
+
+  async function onSubmit(values) {
     try {
-      await fn();
-      setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.SAVED } }));
-      setTimeout(() => {
-        setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.IDLE } }));
-      }, 2000);
+      await update.mutateAsync({
+        moving_average_window: Number(values.moving_average_window),
+        trend_threshold: Number(values.trend_threshold),
+        anomaly_threshold: Number(values.anomaly_threshold),
+      });
+      reset(values); // saved values become the new baseline, so the form is clean again
+      toast.success("Analytics settings saved");
     } catch (err) {
-      setActionStatus((prev) => ({ ...prev, [actionKey]: { status: SAVE_STATUS.ERROR, message: err.message } }));
+      toast.error(err.message);
     }
   }
 
-  function handleSave(panel) {
-    const { section, updateFn } = panel;
-    runAction(`${section}-save`, async () => {
-      const payload =
-        section === "analytics"
-          ? {
-              movingAvgWindow: Number(settings.analytics.movingAvgWindow),
-              trendThreshold: Number(settings.analytics.trendThreshold),
-              anomalyThreshold: Number(settings.analytics.anomalyThreshold),
-            }
-          : settings[section];
-      const saved = await updateFn(payload);
-      setSettings((prev) => ({ ...prev, [section]: saved }));
-    });
-  }
-
-  function handleRestore(panel) {
-    const { section, updateFn } = panel;
-    runAction(`${section}-restore`, async () => {
-      const defaults = await getDefaultSettings();
-      const saved = await updateFn(defaults[section]);
-      setSettings((prev) => ({ ...prev, [section]: saved }));
-    });
-  }
-
-  function actionLabel(actionKey, defaultLabel) {
-    const status = actionStatus[actionKey]?.status;
-    if (status === SAVE_STATUS.SAVING) return "Saving…";
-    if (status === SAVE_STATUS.SAVED) return "Saved ✓";
-    return defaultLabel;
-  }
-
-  function isBusy(actionKey) {
-    return actionStatus[actionKey]?.status === SAVE_STATUS.SAVING;
-  }
-
-  // Renders the Save + Restore Defaults row and any error message for a
-  // panel, shared by every settings box below so each one stays in sync.
-  function PanelActions({ panel }) {
-    const saveKey = `${panel.section}-save`;
-    const restoreKey = `${panel.section}-restore`;
-    const err =
-      actionStatus[saveKey]?.status === SAVE_STATUS.ERROR
-        ? actionStatus[saveKey].message
-        : actionStatus[restoreKey]?.status === SAVE_STATUS.ERROR
-        ? actionStatus[restoreKey].message
-        : null;
-    return (
-      <>
-        {err && <p className="error-text">{err}</p>}
-        <div className="settings-actions" style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-navy btn-block"
-            onClick={() => handleSave(panel)}
-            disabled={isBusy(saveKey) || isBusy(restoreKey)}
-          >
-            {actionLabel(saveKey, panel.saveLabel)}
-          </button>
-          <button
-            className="btn btn-block"
-            onClick={() => handleRestore(panel)}
-            disabled={isBusy(saveKey) || isBusy(restoreKey)}
-          >
-            {actionLabel(restoreKey, "Restore Defaults")}
-          </button>
-        </div>
-      </>
-    );
+  function handleRestore() {
+    // keepDefaultValues: the form shows the defaults but still compares against what's
+    // saved, so Save enables and nothing is written until the owner confirms.
+    reset(ANALYTICS_DEFAULTS, { keepDefaultValues: true });
+    toast("Defaults loaded. Click Save to apply them.");
   }
 
   return (
+    <form className="panel" onSubmit={handleSubmit(onSubmit)} noValidate>
+      <h3 className="panel-title">📊 Analytics Settings</h3>
+      <p className="panel-sub">Configure moving average and trend thresholds</p>
+
+      <TextField
+        id="ma-window" label="Moving Average Window (days)" type="number" step="1"
+        registration={register("moving_average_window")} error={errors.moving_average_window?.message}
+      />
+      <TextField
+        id="trend-threshold" label="Trend Threshold (%)" type="number" step="any"
+        hint={`Change of ±${trend}% = Increasing or Decreasing`}
+        registration={register("trend_threshold")} error={errors.trend_threshold?.message}
+      />
+      <TextField
+        id="anomaly-threshold" label="Branch Anomaly Flag Threshold (%)" type="number" step="any"
+        hint={`Flag branch if transactions drop more than ${anomaly}% vs avg`}
+        registration={register("anomaly_threshold")} error={errors.anomaly_threshold?.message}
+      />
+
+      <PanelActions
+        isDirty={isDirty} isSaving={update.isPending}
+        saveLabel="Save Analytics Settings" onRestore={handleRestore}
+      />
+    </form>
+  );
+}
+
+function InventoryAlertsPanel({ settings }) {
+  const update = useUpdateSettings();
+  const {
+    register, handleSubmit, reset,
+    formState: { errors, isDirty },
+  } = useForm({
+    resolver: zodResolver(inventoryAlertSchema),
+    defaultValues: withDefaults(settings, INVENTORY_ALERT_DEFAULTS),
+  });
+
+  async function onSubmit(values) {
+    try {
+      await update.mutateAsync({
+        low_stock_default_kg: Number(values.low_stock_default_kg),
+        low_stock_default_pcs: Number(values.low_stock_default_pcs),
+      });
+      reset(values);
+      toast.success("Inventory alert settings saved");
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  function handleRestore() {
+    reset(INVENTORY_ALERT_DEFAULTS, { keepDefaultValues: true });
+    toast("Defaults loaded. Click Save to apply them.");
+  }
+
+  return (
+    <form className="panel" onSubmit={handleSubmit(onSubmit)} noValidate>
+      <h3 className="panel-title">📦 Inventory Alert Settings</h3>
+      <p className="panel-sub">
+        Suggested reorder level when adding a new ingredient. Existing items keep their own levels.
+      </p>
+
+      <TextField
+        id="low-stock-kg" label="Default low-stock level: kg ingredients" type="number" step="any"
+        registration={register("low_stock_default_kg")} error={errors.low_stock_default_kg?.message}
+      />
+      <TextField
+        id="low-stock-pcs" label="Default low-stock level: piece ingredients" type="number" step="any"
+        registration={register("low_stock_default_pcs")} error={errors.low_stock_default_pcs?.message}
+      />
+
+      <PanelActions
+        isDirty={isDirty} isSaving={update.isPending}
+        saveLabel="Save Alert Settings" onRestore={handleRestore}
+      />
+    </form>
+  );
+}
+
+function ReceiptForm({ branchId, receipt }) {
+  const update = useUpdateReceiptSettings(branchId);
+  const {
+    register, handleSubmit, reset,
+    formState: { errors, isDirty },
+  } = useForm({
+    resolver: zodResolver(receiptSchema),
+    defaultValues: {
+      business_name: receipt.business_name ?? RECEIPT_DEFAULTS.business_name,
+      footer_message: receipt.footer_message ?? RECEIPT_DEFAULTS.footer_message,
+    },
+  });
+
+  async function onSubmit(values) {
+    try {
+      await update.mutateAsync(values);
+      reset(values);
+      toast.success("Receipt settings saved");
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  function handleRestore() {
+    reset(RECEIPT_DEFAULTS, { keepDefaultValues: true });
+    toast("Defaults loaded. Click Save to apply them.");
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <TextField
+        id="receipt-name" label="Business Name on Receipt"
+        registration={register("business_name")} error={errors.business_name?.message}
+      />
+      <TextField
+        id="receipt-footer" label="Footer Message"
+        registration={register("footer_message")} error={errors.footer_message?.message}
+      />
+      <PanelActions
+        isDirty={isDirty} isSaving={update.isPending}
+        saveLabel="Save Receipt Settings" onRestore={handleRestore}
+      />
+    </form>
+  );
+}
+
+function ReceiptPanel() {
+  const { data: branches = [] } = useBranches();
+  const activeBranches = branches.filter((b) => b.is_active);
+  const [pickedBranch, setPickedBranch] = useState("");
+  const branchId = pickedBranch || String(activeBranches[0]?.branch_id ?? "");
+
+  const { data: receipt, error } = useReceiptSettings(branchId);
+
+  return (
+    <div className="panel">
+      <h3 className="panel-title">🧾 Receipt Settings</h3>
+      <p className="panel-sub">Printed on receipts for the selected branch</p>
+
+      <label className="form-label" htmlFor="receipt-branch">Branch</label>
+      <select
+        id="receipt-branch" className="form-input" value={branchId}
+        onChange={(e) => setPickedBranch(e.target.value)}
+      >
+        {activeBranches.map((b) => (
+          <option key={b.branch_id} value={String(b.branch_id)}>{b.branch_name}</option>
+        ))}
+      </select>
+
+      {!branchId && <p className="loading-text">No active branches.</p>}
+      {error && <p className="error-text">Couldn't load receipt settings. {error.message}</p>}
+      {/* key remounts the form with fresh values whenever the branch changes */}
+      {receipt && <ReceiptForm key={branchId} branchId={branchId} receipt={receipt} />}
+    </div>
+  );
+}
+
+function SecurityPanel() {
+  const { data: items = [], isLoading, error } = useSecurityStatus();
+
+  return (
+    <div className="panel">
+      <h3 className="panel-title">🔒 Security Settings</h3>
+      {isLoading && <p className="loading-text">Checking…</p>}
+      {error && <p className="error-text">Couldn't load security status. {error.message}</p>}
+      {items.map((item) => (
+        <div className="security-row" key={item.key}>
+          <span>{item.label}</span>
+          <span className={`badge ${item.ok ? "badge-good" : "badge-warn"}`}>
+            {item.value} {item.ok ? "✓" : "⚠"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------- Page ----------
+export default function SettingsView() {
+  const { data: settings, isLoading, error } = useSettings();
+
+  if (error) return <p className="error-text">Couldn't load settings. {error.message}</p>;
+  if (isLoading) return <p className="loading-text">Loading settings…</p>;
+
+  return (
     <div className="settings-grid">
-      <div className="panel">
-        <h3 className="panel-title">📊 Analytics Settings</h3>
-        <p className="panel-sub">Configure moving average and trend thresholds</p>
-
-        <label className="form-label">Moving Average Window (days)</label>
-        <input
-          type="number"
-          className="form-input"
-          value={settings.analytics.movingAvgWindow}
-          onChange={(e) => updateField("analytics", "movingAvgWindow", e.target.value)}
-        />
-
-        <label className="form-label">Trend Threshold (%)</label>
-        <input
-          type="number"
-          className="form-input"
-          value={settings.analytics.trendThreshold}
-          onChange={(e) => updateField("analytics", "trendThreshold", e.target.value)}
-        />
-        <p className="form-hint">Change of ±{settings.analytics.trendThreshold}% = Increasing or Decreasing</p>
-
-        <label className="form-label">Branch Anomaly Flag Threshold (%)</label>
-        <input
-          type="number"
-          className="form-input"
-          value={settings.analytics.anomalyThreshold}
-          onChange={(e) => updateField("analytics", "anomalyThreshold", e.target.value)}
-        />
-        <p className="form-hint">Flag branch if transactions drop more than {settings.analytics.anomalyThreshold}% vs avg</p>
-
-        <PanelActions panel={SETTINGS_PANELS[0]} />
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">🧾 Receipt Settings</h3>
-
-        <label className="form-label">Business Name on Receipt</label>
-        <input
-          type="text"
-          className="form-input"
-          value={settings.receipt.businessName}
-          onChange={(e) => updateField("receipt", "businessName", e.target.value)}
-        />
-
-        <label className="form-label">Tagline</label>
-        <input
-          type="text"
-          className="form-input"
-          value={settings.receipt.tagline}
-          onChange={(e) => updateField("receipt", "tagline", e.target.value)}
-        />
-
-        <label className="form-label">Footer Message</label>
-        <input
-          type="text"
-          className="form-input"
-          value={settings.receipt.footer}
-          onChange={(e) => updateField("receipt", "footer", e.target.value)}
-        />
-
-        <PanelActions panel={SETTINGS_PANELS[1]} />
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">🔒 Security Settings</h3>
-        <div className="security-row">
-          <span>Password encryption</span>
-          <span className="badge badge-good">bcrypt ✓</span>
-        </div>
-        <div className="security-row">
-          <span>JWT Auth</span>
-          <span className="badge badge-good">Active ✓</span>
-        </div>
-        <div className="security-row">
-          <span>Daily backup</span>
-          <span className="badge badge-good">Supabase ✓</span>
-        </div>
-        <div className="security-row">
-          <span>HTTPS</span>
-          <span className="badge badge-good">Vercel ✓</span>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">📦 Inventory Alert Settings</h3>
-        <p className="panel-sub">Default reorder thresholds for all ingredients</p>
-
-        <label className="form-label">Low Stock Alert — kg ingredients</label>
-        <input
-          type="text"
-          className="form-input"
-          value={settings.inventoryAlerts.lowStockKg}
-          onChange={(e) => updateField("inventoryAlerts", "lowStockKg", e.target.value)}
-        />
-
-        <label className="form-label">Low Stock Alert — piece ingredients</label>
-        <input
-          type="text"
-          className="form-input"
-          value={settings.inventoryAlerts.lowStockPcs}
-          onChange={(e) => updateField("inventoryAlerts", "lowStockPcs", e.target.value)}
-        />
-
-        <PanelActions panel={SETTINGS_PANELS[2]} />
-      </div>
+      <AnalyticsPanel settings={settings} />
+      <ReceiptPanel />
+      <SecurityPanel />
+      <InventoryAlertsPanel settings={settings} />
     </div>
   );
 }

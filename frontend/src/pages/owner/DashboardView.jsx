@@ -1,17 +1,12 @@
 // src/pages/owner/DashboardView.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Tooltip,
-  Title,
-} from "chart.js";
-import { BarChart3, Trophy, Sparkles, Clock, X } from "lucide-react";
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Title } from "chart.js";
+import { BarChart3, Trophy, Lightbulb, Clock, RefreshCw, X } from "lucide-react";
+import { format } from "date-fns";
 import StatCard from "../../components/StatCard";
-import { getDashboardData } from "../../api/mockOwner";
+import { useDashboard } from "../../hooks/useAnalytics";
+import { formatPeso, formatPesoWhole } from "../../utils/format";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Title);
 
@@ -27,9 +22,10 @@ const COLORS = {
 };
 
 const BRANCH_COLORS = [COLORS.navy, COLORS.blue, COLORS.purple, COLORS.orange];
-// Appends alpha (in hex) to a 6-digit hex color, used to fade out
-// non-selected bars once a branch is picked.
 const withAlpha = (hex, alpha) => `${hex}${alpha}`;
+
+const MAX_TOP_ITEMS = 10;
+const MAX_NOTICES = 6;
 
 const tooltipStyle = {
   backgroundColor: "#ffffff",
@@ -56,6 +52,21 @@ const responsiveBase = {
   resizeDelay: 200,
   animation: false,
 };
+
+function changeVsYesterday(current, previous) {
+  if (previous === 0) return { change: "No data at this time yesterday", changeType: "muted" };
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct === 0) return { change: "→ Same as this time yesterday", changeType: "muted" };
+  return pct > 0
+    ? { change: `↑ ${pct}% vs this time yesterday`, changeType: "up" }
+    : { change: `↓ ${Math.abs(pct)}% vs this time yesterday`, changeType: "warn" };
+}
+
+function summarizeNames(names, max = 2) {
+  const unique = [...new Set(names)];
+  const shown = unique.slice(0, max).join(", ");
+  return unique.length > max ? `${shown} +${unique.length - max} more` : shown;
+}
 
 function DashboardSkeleton() {
   return (
@@ -92,40 +103,96 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardView() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState(null);
-  // Branch selected by clicking a bar in the Sales chart. null = no filter.
-  const [selectedBranch, setSelectedBranch] = useState(null);
+  const { data, error, isLoading, isFetching, refetch, dataUpdatedAt } = useDashboard();
+  const [selectedId, setSelectedId] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    getDashboardData()
-      .then((d) => {
-        if (cancelled) return;
-        setData(d);
-        setLastUpdated(new Date());
-      })
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const branches = useMemo(() => data?.branches ?? [], [data]);
+
+  // If the selected branch disappears (e.g. deactivated), quietly fall back to "all".
+  const activeId = branches.some((b) => b.branch_id === selectedId) ? selectedId : null;
+  const selectedBranch = branches.find((b) => b.branch_id === activeId) ?? null;
+
+  const toggleBranch = useCallback(
+    (id) => setSelectedId((prev) => (prev === id ? null : id)),
+    []
+  );
+
+  const visible = useMemo(
+    () => (activeId ? branches.filter((b) => b.branch_id === activeId) : branches),
+    [branches, activeId]
+  );
+  const visibleIds = useMemo(() => new Set(visible.map((b) => b.branch_id)), [visible]);
+
+  // Stat cards follow the same filter as the panels.
+  const totals = useMemo(
+    () =>
+      visible.reduce(
+        (t, b) => ({
+          sales: t.sales + b.sales_today,
+          salesPrev: t.salesPrev + b.sales_yesterday,
+          tx: t.tx + b.transactions_today,
+          txPrev: t.txPrev + b.transactions_yesterday,
+        }),
+        { sales: 0, salesPrev: 0, tx: 0, txPrev: 0 }
+      ),
+    [visible]
+  );
+
+  const lowStock = useMemo(
+    () => (data?.low_stock ?? []).filter((r) => visibleIds.has(r.branch_id)),
+    [data, visibleIds]
+  );
+
+  const topItems = useMemo(() => {
+    const byItem = new Map();
+    for (const row of data?.top_items ?? []) {
+      if (!visibleIds.has(row.branch_id)) continue;
+      const entry = byItem.get(row.item_id) ?? { name: row.item_name, sold: 0 };
+      entry.sold += row.total_sold;
+      byItem.set(row.item_id, entry);
+    }
+    return [...byItem.values()].sort((a, b) => b.sold - a.sold).slice(0, MAX_TOP_ITEMS);
+  }, [data, visibleIds]);
+
+  // Branch pace anomalies first, then reorder advice, then "demand falling" notes.
+  const notices = useMemo(() => {
+    if (!data) return [];
+    const list = [];
+    for (const b of visible) {
+      if (b.flagged) {
+        list.push({
+          key: `pace-${b.branch_id}`,
+          kind: "pace",
+          warn: true,
+          text: `${b.branch_name} is ${b.percent_below}% below its usual pace for this time of day (${b.today_count} orders vs about ${b.baseline_avg}).`,
+        });
+      }
+    }
+    for (const r of data.recommendations) {
+      if (!visibleIds.has(r.branch_id)) continue;
+      list.push({
+        key: `rec-${r.branch_id}-${r.item_id}`,
+        kind: r.reorder_qty > 0 ? "reorder" : "trend",
+        warn: r.reorder_qty > 0,
+        text: activeId ? r.recommendation : `${r.branch_name}: ${r.recommendation}`,
+      });
+    }
+    return list;
+  }, [data, visible, visibleIds, activeId]);
 
   const salesChart = useMemo(() => {
-    if (!data) return null;
-    const branches = data.salesByBranch;
+    if (!branches.length) return null;
     return {
       data: {
-        labels: branches.map((b) => b.branch),
+        labels: branches.map((b) => b.branch_name),
         datasets: [
           {
             label: "Sales",
-            data: branches.map((b) => b.sales),
+            data: branches.map((b) => b.sales_today),
             backgroundColor: branches.map((b, i) => {
               const base = BRANCH_COLORS[i % BRANCH_COLORS.length];
-              if (!selectedBranch) return base;
-              return b.branch === selectedBranch ? base : withAlpha(base, "33");
+              if (!activeId) return base;
+              return b.branch_id === activeId ? base : withAlpha(base, "33");
             }),
             borderRadius: 8,
             maxBarThickness: 64,
@@ -137,53 +204,35 @@ export default function DashboardView() {
         onHover: (event, elements) => {
           event.native.target.style.cursor = elements.length ? "pointer" : "default";
         },
-        // Clicking a bar sets the filter; clicking the already-selected
-        // bar again clears it.
         onClick: (event, elements) => {
           if (!elements.length) return;
-          const clicked = branches[elements[0].index].branch;
-          setSelectedBranch((prev) => (prev === clicked ? null : clicked));
+          toggleBranch(branches[elements[0].index].branch_id);
         },
         plugins: {
           legend: { display: false },
-          tooltip: {
-            ...tooltipStyle,
-            callbacks: { label: (ctx) => `₱${ctx.parsed.y.toLocaleString()}` },
-          },
+          tooltip: { ...tooltipStyle, callbacks: { label: (ctx) => formatPeso(ctx.parsed.y) } },
         },
         scales: {
           x: { ...baseScaleOptions, grid: { display: false } },
           y: {
             ...baseScaleOptions,
             beginAtZero: true,
-            ticks: {
-              ...baseScaleOptions.ticks,
-              callback: (v) => `₱${Number(v).toLocaleString()}`,
-            },
+            ticks: { ...baseScaleOptions.ticks, callback: (v) => formatPesoWhole(v) },
           },
         },
       },
     };
-  }, [data, selectedBranch]);
-
-  // Items are shown if they don't carry a branch tag at all (so this still
-  // works with your current mock data), or if their branch matches the
-  // selected filter.
-  const sortedTopItems = useMemo(() => {
-    if (!data) return [];
-    const inBranch = (item) => !selectedBranch || !item.branch || item.branch === selectedBranch;
-    return [...data.topItems].filter(inBranch).sort((a, b) => b.sold - a.sold).slice(0, 20);
-  }, [data, selectedBranch]);
+  }, [branches, activeId, toggleBranch]);
 
   const topItemsChart = useMemo(() => {
-    if (!sortedTopItems.length) return null;
+    if (!topItems.length) return null;
     return {
       data: {
-        labels: sortedTopItems.map((i) => i.name),
+        labels: topItems.map((i) => i.name),
         datasets: [
           {
             label: "Sold",
-            data: sortedTopItems.map((i) => i.sold),
+            data: topItems.map((i) => i.sold),
             backgroundColor: COLORS.green,
             borderRadius: 6,
             maxBarThickness: 18,
@@ -195,10 +244,7 @@ export default function DashboardView() {
         indexAxis: "y",
         plugins: {
           legend: { display: false },
-          tooltip: {
-            ...tooltipStyle,
-            callbacks: { label: (ctx) => `${ctx.parsed.x} sold` },
-          },
+          tooltip: { ...tooltipStyle, callbacks: { label: (ctx) => `${ctx.parsed.x} sold` } },
         },
         scales: {
           x: { ...baseScaleOptions, beginAtZero: true, grid: { display: false } },
@@ -216,37 +262,75 @@ export default function DashboardView() {
         },
       },
     };
-  }, [sortedTopItems]);
+  }, [topItems]);
 
-  if (error) return <p className="error-text">Couldn't load dashboard. {error}</p>;
-  if (!data) return <DashboardSkeleton />;
+  if (isLoading) return <DashboardSkeleton />;
 
-  const { stats, branchStatus, aiRecommendations } = data;
-  const topSeller = sortedTopItems[0];
+  if (!data) {
+    return (
+      <div>
+        <p className="error-text">Couldn't load dashboard. {error?.message}</p>
+        <button className="btn btn-navy" onClick={() => refetch()}>
+          Try again
+        </button>
+      </div>
+    );
+  }
 
-  const visibleBranchStatus = selectedBranch
-    ? branchStatus.filter((b) => b.name === selectedBranch)
-    : branchStatus;
-
-  const visibleAiRecommendations = selectedBranch
-    ? aiRecommendations.filter((r) => !r.branch || r.branch === selectedBranch)
-    : aiRecommendations;
+  const updatedLabel = format(new Date(dataUpdatedAt), "h:mm a");
+  const topSeller = topItems[0];
+  const pacePlaces = notices.filter((n) => n.kind === "pace").length;
+  const reorders = notices.filter((n) => n.kind === "reorder").length;
+  const flagCount = pacePlaces + reorders;
+  const lowStockNames = summarizeNames(lowStock.map((r) => r.ingredient_name));
 
   return (
     <>
       <div className="dashboard-meta">
         <Clock size={14} />
-        <span>
-          Updated{" "}
-          {lastUpdated?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        <span>Updated {updatedLabel}</span>
+        <button
+          type="button"
+          className="filter-chip"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          aria-label="Refresh dashboard"
+        >
+          <RefreshCw size={13} />
+          {isFetching ? "Refreshing…" : "Refresh"}
+        </button>
       </div>
 
+      {error && (
+        <p className="error-text" role="alert">
+          Couldn't refresh. Showing data from {updatedLabel}.
+        </p>
+      )}
+
       <div className="stat-grid">
-        <StatCard label="Today's Sales" value={`₱${stats.todaySales.toLocaleString()}`} change={`↑ ${stats.todaySalesChange}`} changeType="up" />
-        <StatCard label="Transactions" value={stats.transactions} change={`↑ ${stats.transactionsChange}`} changeType="up" />
-        <StatCard label="Low Stock Alerts" value={stats.lowStockAlerts} change={`⚠ ${stats.lowStockNote}`} changeType="warn" />
-        <StatCard label="AI Flags" value={stats.aiFlags} change={`⚠ ${stats.aiFlagNote}`} changeType="warn" valueClassName="accent-purple" />
+        <StatCard
+          label="Today's Sales"
+          value={formatPeso(totals.sales)}
+          {...changeVsYesterday(totals.sales, totals.salesPrev)}
+        />
+        <StatCard
+          label="Transactions"
+          value={totals.tx}
+          {...changeVsYesterday(totals.tx, totals.txPrev)}
+        />
+        <StatCard
+          label="Low Stock Alerts"
+          value={lowStock.length}
+          change={lowStock.length ? `⚠ ${lowStockNames}` : "All ingredients stocked"}
+          changeType={lowStock.length ? "warn" : "up"}
+        />
+        <StatCard
+          label="Analytics Flags"
+          value={flagCount}
+          change={flagCount ? `⚠ ${pacePlaces} branch pace, ${reorders} reorder` : "No flags"}
+          changeType={flagCount ? "warn" : "up"}
+          valueClassName="accent-purple"
+        />
       </div>
 
       <div className="dash-grid">
@@ -257,16 +341,33 @@ export default function DashboardView() {
               Sales by Branch — Today
             </h3>
             {selectedBranch && (
-              <button className="filter-chip" onClick={() => setSelectedBranch(null)}>
-                {selectedBranch}
+              <button
+                className="filter-chip"
+                onClick={() => setSelectedId(null)}
+                aria-label={`Clear ${selectedBranch.branch_name} filter`}
+              >
+                {selectedBranch.branch_name}
                 <X size={13} />
               </button>
             )}
           </div>
-          <p className="panel-sub">Click a bar to filter the dashboard by branch</p>
-          <div className="chart-box">
-            <Bar data={salesChart.data} options={salesChart.options} />
-          </div>
+          <p className="panel-sub">Click a bar or a branch below to filter the dashboard</p>
+          {salesChart ? (
+            <div className="chart-box">
+              <Bar
+                data={salesChart.data}
+                options={salesChart.options}
+                role="img"
+                aria-label={`Bar chart of today's sales by branch. ${branches
+                  .map((b) => `${b.branch_name}: ${formatPeso(b.sales_today)}`)
+                  .join(". ")}`}
+              />
+            </div>
+          ) : (
+            <p className="panel-sub" style={{ margin: "1rem 0" }}>
+              No active branches yet.
+            </p>
+          )}
         </div>
 
         <div className="panel panel-modern panel-accent-green">
@@ -276,11 +377,18 @@ export default function DashboardView() {
           </h3>
           {topItemsChart ? (
             <div className="chart-box">
-              <Bar data={topItemsChart.data} options={topItemsChart.options} />
+              <Bar
+                data={topItemsChart.data}
+                options={topItemsChart.options}
+                role="img"
+                aria-label={`Bar chart of top selling items today. ${topItems
+                  .map((i) => `${i.name}: ${i.sold} sold`)
+                  .join(". ")}`}
+              />
             </div>
           ) : (
             <p className="panel-sub" style={{ margin: "1rem 0" }}>
-              No items recorded for {selectedBranch} today.
+              No items sold yet today{selectedBranch ? ` at ${selectedBranch.branch_name}` : ""}.
             </p>
           )}
           {topSeller && (
@@ -295,28 +403,63 @@ export default function DashboardView() {
 
         <div className="panel panel-modern panel-accent-blue">
           <h3 className="panel-title">Branch Status</h3>
-          {visibleBranchStatus.map((b) => (
-            <div className="branch-status-row" key={b.name}>
-              <span className={`status-dot-lg ${b.dotClass}`} />
-              <span className="branch-name">{b.name}</span>
-              <span className={`branch-sales ${b.dotClass === "green" ? "green" : "orange"}`}>₱{b.sales.toLocaleString()}</span>
-              <span className={`badge badge-${b.statusClass}`}>{b.status}</span>
-            </div>
-          ))}
+          {branches.map((b) => {
+            const dimmed = activeId && b.branch_id !== activeId;
+            return (
+              <div
+                className="branch-status-row"
+                key={b.branch_id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={activeId === b.branch_id}
+                onClick={() => toggleBranch(b.branch_id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleBranch(b.branch_id);
+                  }
+                }}
+                style={{ cursor: "pointer", opacity: dimmed ? 0.5 : 1 }}
+              >
+                <span className={`status-dot-lg ${b.flagged ? "orange" : "green"}`} />
+                <span className="branch-name">{b.branch_name}</span>
+                <span className={`branch-sales ${b.flagged ? "orange" : "green"}`}>
+                  {formatPeso(b.sales_today)}
+                </span>
+                <span className={`badge badge-${b.flagged ? "warn" : "good"}`}>
+                  {b.flagged ? "Flagged" : "On pace"}
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="panel panel-ai panel-modern panel-accent-purple">
           <h3 className="panel-title panel-title-icon">
-            <Sparkles size={18} color={COLORS.purple} />
-            AI Recommendations
+            <Lightbulb size={18} color={COLORS.purple} />
+            Recommendations
           </h3>
-          <ul className="ai-list">
-            {visibleAiRecommendations.map((r, i) => (
-              <li key={i} className={r.warn ? "ai-warn" : ""}>
-                {r.text}
-              </li>
-            ))}
-          </ul>
+          {notices.length > 0 ? (
+            <ul className="ai-list">
+              {notices.slice(0, MAX_NOTICES).map((n) => (
+                <li key={n.key} className={n.warn ? "ai-warn" : ""}>
+                  {n.text}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="panel-sub" style={{ margin: "1rem 0" }}>
+              Nothing needs attention right now.
+            </p>
+          )}
+          {notices.length > MAX_NOTICES && (
+            <p className="panel-sub">+{notices.length - MAX_NOTICES} more in Analytics</p>
+          )}
+          <p className="panel-sub">
+            {data.recommendations_as_of
+              ? `Forecasts computed ${format(new Date(data.recommendations_as_of), "MMM d, h:mm a")}`
+              : "No recent forecast yet. Open Analytics to generate one."}
+          </p>
         </div>
       </div>
     </>

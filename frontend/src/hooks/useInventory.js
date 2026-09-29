@@ -31,6 +31,7 @@ export function useLowStock(branchId) {
 
 function invalidateInventory(queryClient) {
   queryClient.invalidateQueries({ queryKey: ["inventory"] });
+  queryClient.invalidateQueries({ queryKey: ["analytics"] });
 }
 
 export function useAddInventoryItem() {

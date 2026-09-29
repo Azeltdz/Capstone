@@ -58,14 +58,14 @@ async function updateBranchReceiptSettings(req, res, next) {
   } catch (err) { next(err); }
 }
 
-// GET /api/settings/security-status  (static — matches Figure 23's security panel)
 function getSecurityStatus(req, res) {
-  res.json({
-    password_hashing: 'bcrypt — active',
-    authentication: 'JWT — active',
-    database_backups: 'Supabase daily backups — active',
-    transport_security: process.env.NODE_ENV === 'production' ? 'HTTPS — active' : 'HTTPS — inactive (dev mode)',
-  });
+  const isProd = process.env.NODE_ENV === 'production';
+  res.json([
+    { key: 'password_hashing', label: 'Password encryption', value: 'bcrypt', ok: true },
+    { key: 'authentication', label: 'JWT Auth', value: 'Active', ok: true },
+    { key: 'database_backups', label: 'Daily backup', value: 'Supabase', ok: true },
+    { key: 'transport_security', label: 'HTTPS', value: isProd ? 'Active' : 'Inactive (dev mode)', ok: isProd },
+  ]);
 }
 
 module.exports = {

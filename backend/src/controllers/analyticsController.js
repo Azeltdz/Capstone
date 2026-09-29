@@ -1,8 +1,9 @@
 const {
   getDailySalesByItem, getActiveMenuItemsForBranch, getBOMForItem, getInventoryForIngredient,
-  saveForecast, getLatestForecastsByBranch, getDailyTransactionCounts, getFoodCostingData, getDashboardKPIs,
+  saveForecast, getLatestForecastsByBranch, getDailyTransactionCounts, getFoodCostingData, getDashboardData,
 } = require('../models/analyticsModel');
 const { classifyTrend, buildRecommendation } = require('../utils/forecastEngine');
+const { evaluatePace } = require('../utils/anomaly');
 const { getAllSystemSettings } = require('../models/settingsModel');
 const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
 const { getBranchById } = require('../models/branchModel');
@@ -110,7 +111,38 @@ async function getFoodCosting(req, res, next) {
 // GET /api/analytics/dashboard
 async function getDashboard(req, res, next) {
   try {
-    res.json(await getDashboardKPIs());
+    const { windowDays, anomalyThreshold } = await getActiveSettings();
+    const raw = await getDashboardData(windowDays);
+    const paceById = Object.fromEntries(raw.pace.map((p) => [p.branch_id, p]));
+
+    const branches = raw.branches.map((b) => {
+      const p = paceById[b.branch_id] ?? { today_count: 0, baseline_avg: 0 };
+      const result = evaluatePace(p, anomalyThreshold);
+      return {
+        ...b,
+        flagged: result.flagged,
+        percent_below: result.percentBelow,
+        baseline_avg: result.baseline,
+        today_count: p.today_count,
+      };
+    });
+
+    const recommendationsAsOf = raw.forecasts.reduce(
+      (latest, f) => (!latest || f.computed_at > latest ? f.computed_at : latest),
+      null
+    );
+    const recommendations = raw.forecasts
+      .filter((f) => f.reorder_qty > 0 || f.trend_label === "decreasing")
+      .sort((a, b) => b.reorder_qty - a.reorder_qty);
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      branches,
+      top_items: raw.topItems,
+      low_stock: raw.lowStock,
+      recommendations,
+      recommendations_as_of: recommendationsAsOf,
+    });
   } catch (err) { next(err); }
 }
 

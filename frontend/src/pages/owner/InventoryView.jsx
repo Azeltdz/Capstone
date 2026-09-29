@@ -10,6 +10,7 @@ import {
   useUpdateInventoryItem,
   useDeleteInventoryItem,
 } from "../../hooks/useInventory";
+import { useSettings } from "../../hooks/useSettings";
 
 const EMPTY_FORM = { branchId: "", name: "", unit: "", unitCost: "", onHand: "", reorder: "" };
 const UNIT_SUGGESTIONS = ["kg", "g", "L", "ml", "pcs", "pack", "bottle", "can", "sack"];
@@ -32,6 +33,9 @@ export default function InventoryView() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  
+  const { data: settings } = useSettings();
+
 
   const filteredItems = useMemo(() => {
     const term = searchInput.trim().toLowerCase();
@@ -48,6 +52,13 @@ export default function InventoryView() {
     if (reorder <= 0) return 100;
     const pct = (onHand / (reorder * 2)) * 100;
     return Math.max(6, Math.min(100, pct));
+  }
+
+  function defaultReorderFor(unit) {
+    const u = unit.trim().toLowerCase();
+    if (u === "kg") return settings?.low_stock_default_kg ?? "";
+    if (u === "pcs" || u === "pc") return settings?.low_stock_default_pcs ?? "";
+    return "";
   }
 
   // ---------- Add / Edit popup ----------
@@ -314,7 +325,18 @@ export default function InventoryView() {
                     list="inventory-units"
                     placeholder="kg, L, pcs…"
                     value={form.unit}
-                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                    onChange={(e) => {
+                      const unit = e.target.value;
+                      setForm((f) => ({
+                        ...f,
+                        unit,
+                        // Only overwrite the reorder level if the owner hasn't typed their own value
+                        reorder:
+                          f.reorder === "" || f.reorder === defaultReorderFor(f.unit)
+                            ? defaultReorderFor(unit)
+                            : f.reorder,
+                      }));
+                    }}
                   />
                   <datalist id="inventory-units">
                     {UNIT_SUGGESTIONS.map((u) => (
