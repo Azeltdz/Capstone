@@ -2,6 +2,8 @@ export const ANALYTICS_DEFAULTS = {
   moving_average_window: "7",
   trend_threshold: "10",
   anomaly_threshold: "20",
+  lead_time_days: "2",
+  safety_stock_days: "1",
 };
 
 export const INVENTORY_ALERT_DEFAULTS = {

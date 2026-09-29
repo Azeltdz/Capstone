@@ -6,8 +6,9 @@ const { requireRole } = require('../middleware/roleMiddleware');
 
 router.use(protect, requireRole('owner'));
 
-router.get('/forecast/:branchId', c.computeForecast);
-router.get('/forecast/:branchId/latest', c.getLatestForecast);
+router.get('/trends', c.getTrends);
+router.get('/procurement', c.getProcurement);
+router.post('/forecasts/refresh', c.refreshForecasts);
 router.get('/branch-anomalies', c.getBranchAnomalies);
 router.get('/food-costing', c.getFoodCosting);
 router.get('/dashboard', c.getDashboard);

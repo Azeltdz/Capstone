@@ -28,6 +28,8 @@ const analyticsSchema = z.object({
   moving_average_window: numericString({ label: "Moving average window", min: 1, max: 30, integer: true }),
   trend_threshold: numericString({ label: "Trend threshold", min: 0, max: 100 }),
   anomaly_threshold: numericString({ label: "Anomaly threshold", min: 0, max: 100 }),
+  lead_time_days: numericString({ label: "Supplier lead time", min: 0, max: 30, integer: true }),
+  safety_stock_days: numericString({ label: "Safety stock", min: 0, max: 30, integer: true }),
 });
 
 const inventoryAlertSchema = z.object({
@@ -94,6 +96,8 @@ function AnalyticsPanel({ settings }) {
         moving_average_window: Number(values.moving_average_window),
         trend_threshold: Number(values.trend_threshold),
         anomaly_threshold: Number(values.anomaly_threshold),
+        lead_time_days: Number(values.lead_time_days),
+        safety_stock_days: Number(values.safety_stock_days),
       });
       reset(values); // saved values become the new baseline, so the form is clean again
       toast.success("Analytics settings saved");
@@ -128,7 +132,16 @@ function AnalyticsPanel({ settings }) {
         hint={`Flag branch if transactions drop more than ${anomaly}% vs avg`}
         registration={register("anomaly_threshold")} error={errors.anomaly_threshold?.message}
       />
-
+      <TextField
+        id="lead-time" label="Supplier Lead Time (days)" type="number" step="1"
+        hint="Days between placing an order and receiving it"
+        registration={register("lead_time_days")} error={errors.lead_time_days?.message}
+      />
+      <TextField
+        id="safety-stock" label="Safety Stock (days)" type="number" step="1"
+        hint="Extra days of stock kept as a buffer"
+        registration={register("safety_stock_days")} error={errors.safety_stock_days?.message}
+      />
       <PanelActions
         isDirty={isDirty} isSaving={update.isPending}
         saveLabel="Save Analytics Settings" onRestore={handleRestore}

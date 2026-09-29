@@ -1,101 +1,74 @@
 const pool = require('../config/db');
+const TZ = "Asia/Manila";
 
-// Daily quantity sold per item, for the last N days (oldest first), 0-filled for gaps
-async function getDailySalesByItem(branchId, itemId, days) {
+// Completed days only (yesterday back N days), Manila time, all active branches.
+async function getDailyItemSales(windowDays) {
   const { rows } = await pool.query(
-    `SELECT DATE(t.transaction_at) AS sale_date, SUM(ti.quantity) AS total_qty
+    `SELECT t.branch_id, ti.item_id,
+            to_char((t.transaction_at AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD') AS sale_date,
+            SUM(ti.quantity) AS qty
       FROM transactions t
       JOIN transaction_items ti ON ti.transaction_id = t.transaction_id
-      WHERE t.branch_id = $1 AND ti.item_id = $2
-        AND t.transaction_at >= CURRENT_DATE - ($3 || ' days')::interval
-      GROUP BY DATE(t.transaction_at)`,
-    [branchId, itemId, days - 1]
+      JOIN branches b ON b.branch_id = t.branch_id AND b.is_active = true
+      WHERE t.status = 'paid'
+        AND (t.transaction_at AT TIME ZONE '${TZ}')::date >= (NOW() AT TIME ZONE '${TZ}')::date - $1::int
+        AND (t.transaction_at AT TIME ZONE '${TZ}')::date <  (NOW() AT TIME ZONE '${TZ}')::date
+      GROUP BY 1, 2, 3`,
+    [windowDays]
   );
-
-  const map = Object.fromEntries(rows.map((r) => [r.sale_date.toISOString().slice(0, 10), Number(r.total_qty)]));
-  const series = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    series.push(map[key] || 0);
-  }
-  return series; // oldest -> newest, length === days
+  return rows.map((r) => ({ ...r, qty: Number(r.qty) }));
 }
 
-async function getActiveMenuItemsForBranch(branchId) {
+// Earliest day each branch recorded a sale (used for the "fewer than N days" rule).
+async function getFirstSaleDays() {
   const { rows } = await pool.query(
-    `SELECT DISTINCT mi.item_id, mi.item_name
-      FROM menu_items mi
-      JOIN transaction_items ti ON ti.item_id = mi.item_id
-      JOIN transactions t ON t.transaction_id = ti.transaction_id
-      WHERE t.branch_id = $1 AND mi.is_available = true`,
+    `SELECT branch_id,
+            to_char(MIN((transaction_at AT TIME ZONE '${TZ}')::date), 'YYYY-MM-DD') AS first_day
+      FROM transactions WHERE status = 'paid' GROUP BY branch_id`
+  );
+  return new Map(rows.map((r) => [r.branch_id, r.first_day]));
+}
+
+async function getActiveItems() {
+  const { rows } = await pool.query(
+    'SELECT item_id, item_name, category FROM menu_items WHERE is_available = true'
+  );
+  return rows;
+}
+
+async function getBomRows() {
+  const { rows } = await pool.query(
+    'SELECT item_id, ingredient_id, quantity_per_unit FROM bill_of_materials'
+  );
+  return rows;
+}
+
+async function getStockRows(branchId) {
+  const { rows } = await pool.query(
+    `SELECT inv.branch_id, inv.ingredient_id, ing.ingredient_name, ing.unit, inv.quantity_on_hand
+      FROM inventory inv
+      JOIN ingredients ing ON ing.ingredient_id = inv.ingredient_id
+      JOIN branches b ON b.branch_id = inv.branch_id AND b.is_active = true
+      WHERE ($1::int IS NULL OR inv.branch_id = $1)`,
     [branchId]
   );
   return rows;
 }
 
-async function getBOMForItem(itemId) {
-  const { rows } = await pool.query(
-    `SELECT b.ingredient_id, b.quantity_per_unit, ing.ingredient_name
-      FROM bill_of_materials b
-      JOIN ingredients ing ON ing.ingredient_id = b.ingredient_id
-      WHERE b.item_id = $1`,
-    [itemId]
+// One row per branch/item/day: repeat visits update it instead of adding more.
+async function upsertForecast({ branch_id, item_id, forecast_date, moving_avg_qty, trend_label, recommendation, reorder_qty }) {
+  await pool.query(
+    `INSERT INTO ai_forecasts
+        (branch_id, item_id, computed_date, moving_avg_qty, trend_label, recommendation, reorder_qty, computed_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      ON CONFLICT (branch_id, item_id, computed_date)
+      DO UPDATE SET moving_avg_qty = EXCLUDED.moving_avg_qty, trend_label = EXCLUDED.trend_label,
+                    recommendation = EXCLUDED.recommendation, reorder_qty = EXCLUDED.reorder_qty,
+                    computed_at = NOW()`,
+    [branch_id, item_id, forecast_date, moving_avg_qty, trend_label, recommendation, reorder_qty]
   );
-  return rows;
 }
 
-async function getInventoryForIngredient(branchId, ingredientId) {
-  const { rows } = await pool.query(
-    'SELECT quantity_on_hand FROM inventory WHERE branch_id = $1 AND ingredient_id = $2',
-    [branchId, ingredientId]
-  );
-  return rows[0];
-}
-
-async function saveForecast({ branch_id, item_id, moving_avg_qty, trend_label, recommendation, reorder_qty }) {
-  const { rows } = await pool.query(
-    `INSERT INTO ai_forecasts (branch_id, item_id, computed_date, moving_avg_qty, trend_label, recommendation, reorder_qty, computed_at)
-      VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, NOW())
-     RETURNING *`,
-    [branch_id, item_id, moving_avg_qty, trend_label, recommendation, reorder_qty]
-  );
-  return rows[0];
-}
-
-async function getLatestForecastsByBranch(branchId) {
-  const { rows } = await pool.query(
-    `SELECT f.*, mi.item_name
-      FROM ai_forecasts f
-      JOIN menu_items mi ON mi.item_id = f.item_id
-      WHERE f.branch_id = $1 AND f.computed_date = CURRENT_DATE
-      ORDER BY f.computed_at DESC`,
-    [branchId]
-  );
-  return rows;
-}
-
-// Daily transaction count per branch, for branch anomaly detection
-async function getDailyTransactionCounts(branchId, days) {
-  const { rows } = await pool.query(
-    `SELECT DATE(transaction_at) AS tx_date, COUNT(*) AS tx_count
-      FROM transactions
-      WHERE branch_id = $1 AND transaction_at >= CURRENT_DATE - ($2 || ' days')::interval
-      GROUP BY DATE(transaction_at)`,
-    [branchId, days - 1]
-  );
-  const map = Object.fromEntries(rows.map((r) => [r.tx_date.toISOString().slice(0, 10), Number(r.tx_count)]));
-  const series = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    series.push(map[d.toISOString().slice(0, 10)] || 0);
-  }
-  return series;
-}
-
-// Food costing: cost per serving + margin, from BOM + current ingredient prices
 async function getFoodCostingData() {
   const { rows } = await pool.query(
     `SELECT mi.item_id, mi.item_name, mi.selling_price,
@@ -121,7 +94,6 @@ async function getFoodCostingData() {
   });
 }
 
-const TZ = "Asia/Manila";
 // Today vs. the same time yesterday, per active branch.
 async function getBranchDashboardStats() {
   const { rows } = await pool.query(`
@@ -246,6 +218,8 @@ async function getDashboardData(windowDays) {
 }
 
 module.exports = {
-  getDailySalesByItem, getActiveMenuItemsForBranch, getBOMForItem, getInventoryForIngredient, saveForecast, 
-  getLatestForecastsByBranch, getDailyTransactionCounts, getFoodCostingData, getDashboardData, getBranchPaceStats,
+  getDailyItemSales, getFirstSaleDays, getActiveItems, getBomRows, getStockRows, upsertForecast,
+  getBranchDashboardStats, getBranchPaceStats, getTopItemsToday, getLowStockActiveBranches,
+  getLatestForecasts, getDashboardData,
+  getFoodCostingData,
 };

@@ -1,117 +1,84 @@
-const {
-  getDailySalesByItem, getActiveMenuItemsForBranch, getBOMForItem, getInventoryForIngredient,
-  saveForecast, getLatestForecastsByBranch, getDailyTransactionCounts, getFoodCostingData, getDashboardData,
-} = require('../models/analyticsModel');
-const { classifyTrend, buildRecommendation } = require('../utils/forecastEngine');
-const { evaluatePace } = require('../utils/anomaly');
-const { getAllSystemSettings } = require('../models/settingsModel');
-const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
-const { getBranchById } = require('../models/branchModel');
+const { getDashboardData, getBranchPaceStats, getFoodCostingData } = require('../models/analyticsModel');
+const { getAllBranches, getBranchById } = require('../models/branchModel');
+const { evaluatePace, MIN_BASELINE } = require('../utils/anomaly');
+const analytics = require('../services/analyticsService');
 
-async function getActiveSettings() {
-  const rows = await getAllSystemSettings();
-  const stored = Object.fromEntries(rows.map((r) => [r.setting_key, r.setting_value]));
-  const merged = { ...DEFAULT_SETTINGS, ...stored };
-  return {
-    windowDays: Number(merged.moving_average_window),
-    trendThreshold: Number(merged.trend_threshold),
-    anomalyThreshold: Number(merged.anomaly_threshold),
-  };
+// Reads ?branchId= (missing or "all" = every active branch). Sends the error response itself.
+async function resolveBranchScope(req, res) {
+  const raw = req.query.branchId;
+  if (raw === undefined || raw === '' || raw === 'all') return { branchId: null };
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ message: 'branchId must be a positive whole number' });
+    return null;
+  }
+  if (!(await getBranchById(id))) {
+    res.status(404).json({ message: 'Branch not found' });
+    return null;
+  }
+  return { branchId: id };
 }
 
-// GET /api/analytics/forecast/:branchId  (computes fresh AND saves to ai_forecasts)
-async function computeForecast(req, res, next) {
+async function getTrends(req, res, next) {
   try {
-    const { branchId } = req.params;
-    const branch = await getBranchById(branchId);
-    if (!branch) return res.status(404).json({ message: 'Branch not found' });
-
-    const { windowDays, trendThreshold } = await getActiveSettings();
-    const items = await getActiveMenuItemsForBranch(branchId);
-
-    const results = [];
-    for (const item of items) {
-      const series = await getDailySalesByItem(branchId, item.item_id, windowDays);
-      const { movingAvg, trend_label } = classifyTrend(series, trendThreshold);
-
-      const bomRows = await getBOMForItem(item.item_id);
-      const inventoryLookup = {};
-      for (const bom of bomRows) {
-        inventoryLookup[bom.ingredient_id] = await getInventoryForIngredient(branchId, bom.ingredient_id);
-      }
-
-      const { recommendation, reorder_qty } = buildRecommendation({
-        item_name: item.item_name, trend_label, movingAvg, bomRows, inventoryLookup,
-      });
-
-      const saved = await saveForecast({
-        branch_id: branchId,
-        item_id: item.item_id,
-        moving_avg_qty: Number(movingAvg.toFixed(2)),
-        trend_label,
-        recommendation,
-        reorder_qty,
-      });
-
-      results.push({ ...saved, item_name: item.item_name, daily_series: series });
-    }
-
-    res.json({ window_days: windowDays, trend_threshold: trendThreshold, forecasts: results });
+    const scope = await resolveBranchScope(req, res);
+    if (!scope) return;
+    res.json(await analytics.getTrends(scope.branchId));
   } catch (err) { next(err); }
 }
 
-// GET /api/analytics/forecast/:branchId/latest  (read today's already-saved forecasts, no recompute)
-async function getLatestForecast(req, res, next) {
+async function getProcurement(req, res, next) {
   try {
-    res.json(await getLatestForecastsByBranch(req.params.branchId));
+    const scope = await resolveBranchScope(req, res);
+    if (!scope) return;
+    res.json(await analytics.getProcurement(scope.branchId));
   } catch (err) { next(err); }
 }
 
-// GET /api/analytics/branch-anomalies
+async function refreshForecasts(req, res, next) {
+  try {
+    res.json(await analytics.refreshForecasts());
+  } catch (err) { next(err); }
+}
+
 async function getBranchAnomalies(req, res, next) {
   try {
-    const { anomalyThreshold, windowDays } = await getActiveSettings();
-    const { getAllBranches } = require('../models/branchModel');
-    const branches = await getAllBranches();
+    const { windowDays, anomalyThreshold } = await analytics.getActiveSettings();
+    const [pace, branches] = await Promise.all([getBranchPaceStats(windowDays), getAllBranches()]);
+    const nameById = new Map(branches.map((b) => [b.branch_id, b.branch_name]));
 
-    const anomalies = [];
-    for (const branch of branches) {
-      const series = await getDailyTransactionCounts(branch.branch_id, windowDays);
-      const movingAvg = series.reduce((a, b) => a + b, 0) / windowDays;
-      const today = series[series.length - 1];
+    const rows = pace
+      .map((p) => {
+        const r = evaluatePace(p, anomalyThreshold);
+        return {
+          branch_id: p.branch_id,
+          branch_name: nameById.get(p.branch_id),
+          expected: r.baseline,
+          actual: p.today_count,
+          percent_below: r.percentBelow,
+          flagged: r.flagged,
+          enough_history: p.baseline_avg >= MIN_BASELINE,
+        };
+      })
+      .sort((a, b) => Number(b.flagged) - Number(a.flagged) || b.percent_below - a.percent_below);
 
-      if (movingAvg > 0) {
-        const percentBelow = ((movingAvg - today) / movingAvg) * 100;
-        if (percentBelow >= anomalyThreshold) {
-          anomalies.push({
-            branch_id: branch.branch_id,
-            branch_name: branch.branch_name,
-            today_transactions: today,
-            moving_avg_transactions: Number(movingAvg.toFixed(2)),
-            percent_below_average: Number(percentBelow.toFixed(1)),
-          });
-        }
-      }
-    }
-
-    res.json({ anomaly_threshold: anomalyThreshold, anomalies });
+    res.json({ anomaly_threshold: anomalyThreshold, window_days: windowDays, branches: rows });
   } catch (err) { next(err); }
 }
 
-// GET /api/analytics/food-costing
 async function getFoodCosting(req, res, next) {
   try {
     const data = await getFoodCostingData();
-    const lowestMargin = data.reduce((min, item) =>
-      !min || item.margin_percent < min.margin_percent ? item : min, null);
+    const lowestMargin = data.reduce(
+      (min, item) => (!min || item.margin_percent < min.margin_percent ? item : min), null
+    );
     res.json({ items: data, lowest_margin_item: lowestMargin });
   } catch (err) { next(err); }
 }
 
-// GET /api/analytics/dashboard
 async function getDashboard(req, res, next) {
   try {
-    const { windowDays, anomalyThreshold } = await getActiveSettings();
+    const { windowDays, anomalyThreshold } = await analytics.getActiveSettings();
     const raw = await getDashboardData(windowDays);
     const paceById = Object.fromEntries(raw.pace.map((p) => [p.branch_id, p]));
 
@@ -128,11 +95,10 @@ async function getDashboard(req, res, next) {
     });
 
     const recommendationsAsOf = raw.forecasts.reduce(
-      (latest, f) => (!latest || f.computed_at > latest ? f.computed_at : latest),
-      null
+      (latest, f) => (!latest || f.computed_at > latest ? f.computed_at : latest), null
     );
     const recommendations = raw.forecasts
-      .filter((f) => f.reorder_qty > 0 || f.trend_label === "decreasing")
+      .filter((f) => f.reorder_qty > 0 || f.trend_label === 'decreasing')
       .sort((a, b) => b.reorder_qty - a.reorder_qty);
 
     res.json({
@@ -147,5 +113,5 @@ async function getDashboard(req, res, next) {
 }
 
 module.exports = {
-  computeForecast, getLatestForecast, getBranchAnomalies, getFoodCosting, getDashboard,
+  getTrends, getProcurement, refreshForecasts, getBranchAnomalies, getFoodCosting, getDashboard,
 };
