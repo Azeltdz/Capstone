@@ -70,26 +70,36 @@ async function upsertForecast({ branch_id, item_id, forecast_date, moving_avg_qt
 }
 
 async function getFoodCostingData() {
-  const { rows } = await pool.query(
-    `SELECT mi.item_id, mi.item_name, mi.selling_price,
-            COALESCE(SUM(b.quantity_per_unit * ing.unit_cost), 0) AS cost_per_serving
-      FROM menu_items mi
-      LEFT JOIN bill_of_materials b ON b.item_id = mi.item_id
-      LEFT JOIN ingredients ing ON ing.ingredient_id = b.ingredient_id
-      WHERE mi.is_available = true
-      GROUP BY mi.item_id, mi.item_name, mi.selling_price`
-  );
+  const { rows } = await pool.query(`
+    SELECT mi.item_id, mi.item_name, mi.category, mi.selling_price, mi.is_available,
+            COUNT(b.bom_id) AS bom_count,
+            SUM(b.quantity_per_unit * ing.unit_cost) AS cost_per_serving
+    FROM menu_items mi
+    LEFT JOIN bill_of_materials b ON b.item_id = mi.item_id
+    LEFT JOIN ingredients ing ON ing.ingredient_id = b.ingredient_id
+    GROUP BY mi.item_id
+    ORDER BY mi.item_name ASC
+  `);
+
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const round2 = (n) => Math.round(n * 100) / 100;
+
   return rows.map((r) => {
-    const cost = Number(r.cost_per_serving);
     const price = Number(r.selling_price);
-    const margin = price - cost;
+    const bomCount = Number(r.bom_count);
+    const cost = bomCount > 0 ? round2(Number(r.cost_per_serving)) : null;
+    const costed = cost !== null && price > 0;
     return {
       item_id: r.item_id,
       item_name: r.item_name,
+      category: r.category,
+      is_available: r.is_available,
       selling_price: price,
+      bom_count: bomCount,
       cost_per_serving: cost,
-      gross_margin: margin,
-      margin_percent: price > 0 ? Number(((margin / price) * 100).toFixed(2)) : 0,
+      gross_margin: costed ? round2(price - cost) : null,
+      margin_percent: costed ? round1(((price - cost) / price) * 100) : null,
+      food_cost_percent: costed ? round1((cost / price) * 100) : null,
     };
   });
 }

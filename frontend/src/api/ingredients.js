@@ -10,3 +10,6 @@ export function createIngredient(payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export const updateIngredient = (id, payload) =>
+  apiFetch(`/api/ingredients/${id}`, { method: "PUT", body: JSON.stringify(payload) });

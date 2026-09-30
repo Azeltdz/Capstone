@@ -68,11 +68,25 @@ async function getBranchAnomalies(req, res, next) {
 
 async function getFoodCosting(req, res, next) {
   try {
-    const data = await getFoodCostingData();
-    const lowestMargin = data.reduce(
-      (min, item) => (!min || item.margin_percent < min.margin_percent ? item : min), null
-    );
-    res.json({ items: data, lowest_margin_item: lowestMargin });
+    const items = await getFoodCostingData();
+
+    const live = items.filter((i) => i.is_available);
+    const costed = live.filter((i) => i.margin_percent !== null);
+    const byMargin = [...costed].sort((a, b) => b.margin_percent - a.margin_percent);
+    const brief = (i) => (i ? { item_id: i.item_id, item_name: i.item_name, margin_percent: i.margin_percent } : null);
+    const mean = costed.length ? costed.reduce((s, i) => s + i.food_cost_percent, 0) / costed.length : null;
+
+    res.json({
+      items,
+      stats: {
+        total_items: live.length,
+        costed_items: costed.length,
+        missing_recipe_count: live.filter((i) => i.bom_count === 0).length,
+        avg_food_cost_percent: mean === null ? null : Math.round(mean * 10) / 10,
+        highest_margin: brief(byMargin[0]),
+        lowest_margin: brief(byMargin[byMargin.length - 1]),
+      },
+    });
   } catch (err) { next(err); }
 }
 

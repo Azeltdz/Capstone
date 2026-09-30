@@ -7,3 +7,4 @@ export const getTrends = (branchId) => apiFetch(`/api/analytics/trends${scope(br
 export const getProcurement = (branchId) => apiFetch(`/api/analytics/procurement${scope(branchId)}`);
 export const getBranchAnomalies = () => apiFetch("/api/analytics/branch-anomalies");
 export const refreshForecasts = () => apiFetch("/api/analytics/forecasts/refresh", { method: "POST" });
+export const getFoodCosting = () => apiFetch("/api/analytics/food-costing");
