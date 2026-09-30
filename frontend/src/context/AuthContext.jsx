@@ -1,10 +1,14 @@
 // src/context/AuthContext.jsx
 import { createContext, useContext, useState, useCallback } from "react";
 import { apiFetch, ApiError } from "../api/client";
+import { useQueryClient } from "@tanstack/react-query";
 
 const AuthContext = createContext(null);
 
+
 export function AuthProvider({ children }) {
+  const queryClient = useQueryClient();
+
   const [user, setUser] = useState(() => {
     const stored = sessionStorage.getItem("user");
     return stored ? JSON.parse(stored) : null;
@@ -30,8 +34,9 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     sessionStorage.clear();
+    queryClient.clear();
     setUser(null);
-  }, []);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, login, logout }}>

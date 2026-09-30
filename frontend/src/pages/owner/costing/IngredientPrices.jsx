@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import toast from "react-hot-toast";
 import { useIngredients, useUpdateIngredient } from "../../../hooks/useIngredients";
 import { formatPeso } from "../../../utils/format";
-import ModalShell from "./ModalShell";
+import ModalShell from "../../../components/ModalShell";
 
 function PriceEditor({ ingredient, onClose }) {
   const update = useUpdateIngredient();

@@ -4,7 +4,7 @@ import { useRecipe, useSaveRecipe } from "../../../hooks/useFoodcosting";
 import { useIngredients } from "../../../hooks/useIngredients";
 import { formatPeso } from "../../../utils/format";
 import { TARGET_FOOD_COST_PCT, costTone } from "../../../constants/costing";
-import ModalShell from "./ModalShell";
+import ModalShell from "../../../components/ModalShell";
 
 const MIN_QTY = 0.001;
 const round2 = (n) => Math.round(n * 100) / 100;

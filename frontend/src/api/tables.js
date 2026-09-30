@@ -1,12 +1,6 @@
 import { apiFetch } from "./client";
 
-export function getTables(branchId) {
-  return apiFetch(`/api/branches/${branchId}/tables`);
-}
-
-export function updateTableStatus(tableId, status) {
-  return apiFetch(`/api/tables/${tableId}/status`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
-  });
-}
+export const getTables = (branchId) => apiFetch(`/api/branches/${branchId}/tables`);
+export const releaseTable = (tableId) => apiFetch(`/api/tables/${tableId}/release`, { method: "POST" });
+export const saveTableLayout = (branchId, payload) =>
+  apiFetch(`/api/branches/${branchId}/tables/layout`, { method: "PUT", body: JSON.stringify(payload) });

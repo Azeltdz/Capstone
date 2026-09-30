@@ -120,7 +120,7 @@ export default function POSView() {
   return (
     <div className="pos-layout">
       {step === "type" && <OrderTypeStep onSelect={handleOrderTypeSelect} />}
-      {step === "table" && <TableStep onSelect={handleTableSelect} onBack={resetOrder} />}
+      {step === "table" && <TableStep onSelect={handleTableSelect} onBack={resetOrder} guests={customer?.guests} />}
       {step === "menu" && (
         <MenuStep stepNumber={menuStepNumber} cart={cart} onQtyChange={handleQtyChange} onBack={backFromMenu} />
       )}

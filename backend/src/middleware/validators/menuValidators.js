@@ -1,7 +1,12 @@
+const fs = require('fs');
 const { body, param, validationResult } = require('express-validator');
+
 const validate = (req, res, next) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!errors.isEmpty()) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ errors: errors.array() });
+  }
   next();
 };
 
@@ -12,9 +17,26 @@ const ingredientRules = [
   validate,
 ];
 
+const menuIdRule = [param('id').isInt({ min: 1 }).withMessage('Invalid menu item'), validate];
+
 const menuItemRules = [
-  body('item_name').notEmpty().withMessage('item_name is required'),
-  body('selling_price').isFloat({ min: 0 }).withMessage('selling_price must be a positive number'),
+  body('item_name').trim().notEmpty().withMessage('Item name is required')
+    .isLength({ max: 100 }).withMessage('Name must be under 100 characters'),
+  body('category').optional({ checkFalsy: true }).trim().isLength({ max: 50 })
+    .withMessage('Category must be under 50 characters'),
+  body('selling_price').isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be greater than 0'),
+  body('is_available').optional().isBoolean().withMessage('is_available must be true or false'),
+  validate,
+];
+
+const menuItemUpdateRules = [
+  param('id').isInt({ min: 1 }).withMessage('Invalid menu item'),
+  body('item_name').optional().trim().notEmpty().withMessage('Item name cannot be empty')
+    .isLength({ max: 100 }).withMessage('Name must be under 100 characters'),
+  body('category').optional({ checkFalsy: true }).trim().isLength({ max: 50 })
+    .withMessage('Category must be under 50 characters'),
+  body('selling_price').optional().isFloat({ min: 0.01, max: 1000000 }).withMessage('Price must be greater than 0'),
+  body('is_available').optional().isBoolean().withMessage('is_available must be true or false'),
   validate,
 ];
 
@@ -44,4 +66,4 @@ const ingredientUpdateRules = [
   validate,
 ];
 
-module.exports = { ingredientRules, menuItemRules, bomRules, recipeRules, ingredientUpdateRules };
+module.exports = { ingredientRules, menuIdRule, menuItemRules, menuItemUpdateRules, bomRules, recipeRules, ingredientUpdateRules };

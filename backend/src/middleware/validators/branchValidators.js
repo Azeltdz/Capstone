@@ -10,12 +10,10 @@ const validate = (req, res, next) => {
 
 const createBranchRules = [
   body('branch_name').notEmpty().withMessage('branch_name is required'),
-  body('table_count').optional().isInt({ min: 0 }).withMessage('table_count must be a positive integer'),
   validate
 ];
 
 const updateBranchRules = [
-  body('table_count').optional().isInt({ min: 0 }).withMessage('table_count must be a positive integer'),
   body('is_active').optional().isBoolean(),
   validate
 ];

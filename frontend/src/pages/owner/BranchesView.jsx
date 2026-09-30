@@ -6,6 +6,7 @@ import {
   useUpdateBranch,
   useDeleteBranch,
 } from "../../hooks/useBranches";
+import ManageTablesModal from "./branches/ManageTablesModal";
 
 const EMPTY_FORM = { branch_name: "", location: "", contact_number: "" };
 
@@ -32,6 +33,7 @@ export default function BranchesView() {
   const [deleteError, setDeleteError] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [reactivatingId, setReactivatingId] = useState(null);
+  const [tablesBranch, setTablesBranch] = useState(null);
 
   function openAddModal() {
     setEditingId(null);
@@ -153,6 +155,10 @@ export default function BranchesView() {
                 <strong>{b.staff_count}</strong>
               </div>
               <div className="branch-row">
+                <span>Tables</span>
+                <strong>{b.table_count || "None yet"}</strong>
+              </div>
+              <div className="branch-row">
                 <span>Status</span>
                 <span className={`badge ${badgeClass}`}>{label}</span>
               </div>
@@ -170,6 +176,9 @@ export default function BranchesView() {
               <div className="branch-card-actions">
                 {b.is_active ? (
                   <>
+                    <button className="btn btn-outline btn-block" onClick={() => setTablesBranch(b)}>
+                      Manage Tables
+                    </button>
                     <button className="btn btn-outline btn-block" onClick={() => openEditModal(b)}>
                       Edit Branch
                     </button>
@@ -302,6 +311,7 @@ export default function BranchesView() {
           </div>
         </div>
       )}
+      {tablesBranch && <ManageTablesModal branch={tablesBranch} onClose={() => setTablesBranch(null)} />}
     </>
   );
 }

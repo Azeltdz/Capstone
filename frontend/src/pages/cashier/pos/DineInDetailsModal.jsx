@@ -1,25 +1,17 @@
-// src/pages/cashier/pos/DineInDetailsModal.jsx
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useModal } from "../../../hooks/useModal";
 
 const MIN_GUESTS = 1;
 const MAX_GUESTS = 20;
+const MAX_NAME = 100;
 
 export default function DineInDetailsModal({ onSubmit, onClose }) {
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [guests, setGuests] = useState(MIN_GUESTS);
   const [nameError, setNameError] = useState("");
   const nameRef = useRef(null);
 
-  // Focus the name field on open, and close on Escape.
-  useEffect(() => {
-    nameRef.current?.focus();
-    function onKeyDown(e) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  useModal(onClose);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -29,7 +21,7 @@ export default function DineInDetailsModal({ onSubmit, onClose }) {
       nameRef.current?.focus();
       return;
     }
-    onSubmit({ name: trimmed, phone: phone.trim(), guests });
+    onSubmit({ name: trimmed, guests });
   }
 
   return (
@@ -37,62 +29,49 @@ export default function DineInDetailsModal({ onSubmit, onClose }) {
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="create-order-title">
         <div className="modal-header">
           <h3 id="create-order-title">Create Order</h3>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <form className="modal-body" onSubmit={handleSubmit} noValidate>
           <div className="form-field">
-            <label className="form-label" htmlFor="customer-name">
-              Customer Name
-            </label>
+            <label className="form-label" htmlFor="customer-name">Customer Name</label>
             <input
               id="customer-name"
               ref={nameRef}
               className="form-input"
               type="text"
+              autoFocus
+              maxLength={MAX_NAME}
               value={name}
+              aria-invalid={!!nameError}
+              aria-describedby={nameError ? "customer-name-error" : undefined}
               onChange={(e) => {
                 setName(e.target.value);
                 if (nameError) setNameError("");
               }}
               placeholder="Enter customer name"
             />
-            {nameError && <span className="form-error">{nameError}</span>}
+            {nameError && <span id="customer-name-error" className="form-error" role="alert">{nameError}</span>}
           </div>
+
           <div className="form-field">
-            <span className="form-label" id="guest-label">
-              Guest
-            </span>
+            <span className="form-label" id="guest-label">Guest</span>
             <div className="guest-stepper" role="group" aria-labelledby="guest-label">
               <button
-                type="button"
-                className="guest-btn"
-                onClick={() => setGuests((g) => Math.max(MIN_GUESTS, g - 1))}
-                disabled={guests <= MIN_GUESTS}
-                aria-label="Remove one guest"
-              >
-                −
-              </button>
+                type="button" className="guest-btn" aria-label="Remove one guest"
+                onClick={() => setGuests((g) => Math.max(MIN_GUESTS, g - 1))} disabled={guests <= MIN_GUESTS}
+              >−</button>
               <span className="guest-count" aria-live="polite">
                 {guests} {guests === 1 ? "Person" : "People"}
               </span>
               <button
-                type="button"
-                className="guest-btn"
-                onClick={() => setGuests((g) => Math.min(MAX_GUESTS, g + 1))}
-                disabled={guests >= MAX_GUESTS}
-                aria-label="Add one guest"
-              >
-                +
-              </button>
+                type="button" className="guest-btn" aria-label="Add one guest"
+                onClick={() => setGuests((g) => Math.min(MAX_GUESTS, g + 1))} disabled={guests >= MAX_GUESTS}
+              >+</button>
             </div>
           </div>
 
-          <button type="submit" className="btn btn-navy modal-submit">
-            Create Order
-          </button>
+          <button type="submit" className="btn btn-navy modal-submit">Create Order</button>
         </form>
       </div>
     </div>

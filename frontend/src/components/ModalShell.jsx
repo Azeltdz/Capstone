@@ -1,4 +1,4 @@
-import { useModal } from "../../../hooks/useModal";
+import { useModal } from "../hooks/useModal";
 
 export default function ModalShell({ title, subtitle, onClose, width = 680, children }) {
   useModal(onClose);

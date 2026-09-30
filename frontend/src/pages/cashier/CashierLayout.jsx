@@ -8,6 +8,7 @@ const NAV_SECTIONS = [
     label: "Menu",
     items: [
       { to: "/cashier/pos", icon: "🧾", label: "POS" },
+      { to: "/cashier/tables", icon: "🪑", label: "Tables" },
       { to: "/cashier/orders", icon: "📋", label: "Orders" },
     ],
   },

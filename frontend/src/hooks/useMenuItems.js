@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { getMenuItems } from "../api/menu";
+import { getMenuItems, createMenuItem, updateMenuItem, deleteMenuItem } from "../api/menu";
 import { getCategoryMeta } from "../constants/categoryMeta";
 
 export function useMenuItems() {
@@ -38,4 +38,28 @@ export function useMenuItemsByCategory(categoryKey) {
     [items, categoryKey]
   );
   return { items: filtered, isLoading, error };
+}
+
+function invalidateMenu(queryClient) {
+  for (const key of ["menu-items", "food-costing", "analytics"]) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
+
+export function useCreateMenuItem() {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: createMenuItem, onSuccess: () => invalidateMenu(queryClient) });
+}
+
+export function useUpdateMenuItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }) => updateMenuItem(id, body),
+    onSuccess: () => invalidateMenu(queryClient),
+  });
+}
+
+export function useDeleteMenuItem() {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: deleteMenuItem, onSuccess: () => invalidateMenu(queryClient) });
 }

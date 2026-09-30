@@ -10,13 +10,44 @@ async function getMenuItemById(id) {
   return rows[0];
 }
 
-async function createMenuItem({ item_name, category, selling_price, image_url }) {
+async function createMenuItem({ item_name, category, selling_price, image_url, is_available = true }) {
   const { rows } = await pool.query(
     `INSERT INTO menu_items (item_name, category, selling_price, image_url, is_available)
-     VALUES ($1, $2, $3, $4, true) RETURNING *`,
-    [item_name, category, selling_price, image_url]
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [item_name, category, selling_price, image_url, is_available]
   );
   return rows[0];
+}
+
+async function findDuplicate(name, category, excludeId = null) {
+  const { rows } = await pool.query(
+    `SELECT item_id FROM menu_items
+      WHERE LOWER(item_name) = LOWER($1) AND COALESCE(LOWER(category), '') = COALESCE(LOWER($2), '')
+        AND ($3::int IS NULL OR item_id <> $3)
+      LIMIT 1`,
+    [name, category, excludeId]
+  );
+  return rows[0];
+}
+
+async function deleteMenuItemCascade(id) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM bill_of_materials WHERE item_id = $1', [id]);
+    await client.query('DELETE FROM ai_forecasts WHERE item_id = $1', [id]);
+    const { rows } = await client.query('DELETE FROM menu_items WHERE item_id = $1 RETURNING *', [id]);
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') {
+      throw Object.assign(new Error('This item has sales history and cannot be deleted.'), { statusCode: 409 });
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function updateMenuItem(id, { item_name, category, selling_price, image_url, is_available }) {
@@ -46,6 +77,6 @@ async function deleteMenuItem(id) {
 }
 
 module.exports = {
-  getAllMenuItems, getMenuItemById, createMenuItem,
-  updateMenuItem, isMenuItemInUse, deleteMenuItem,
+  getAllMenuItems, getMenuItemById, createMenuItem, updateMenuItem, 
+  isMenuItemInUse, deleteMenuItem, findDuplicate, deleteMenuItemCascade
 };

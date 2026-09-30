@@ -29,8 +29,7 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
       total_amount += subtotal;
       return { ...orderItem, unit_price: menuItem.selling_price, subtotal };
     });
-    // Deduct inventory via BOM, with row locks to prevent race conditions
-    //    between two cashiers selling the last of an ingredient at once
+
     for (const orderItem of itemsWithPrice) {
       const { rows: bomRows } = await client.query(
         `SELECT ingredient_id, quantity_per_unit FROM bill_of_materials WHERE item_id = $1`,
@@ -73,7 +72,7 @@ async function createOrderWithItems({ branch_id, cashier_id, table_id, order_typ
         throw Object.assign(new Error('table_id is required for dine-in orders'), { statusCode: 400 });
       }
       const { rows: tableRows } = await client.query(
-        `SELECT * FROM tables WHERE table_id = $1 AND branch_id = $2 FOR UPDATE`,
+        `SELECT * FROM tables WHERE table_id = $1 AND branch_id = $2 AND is_active = true FOR UPDATE`,
         [table_id, branch_id]
       );
       if (tableRows.length === 0) {

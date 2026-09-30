@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getTables, updateTableStatus } from "../api/tables";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getTables, releaseTable, saveTableLayout } from "../api/tables";
 
 export function useTables(branchId) {
   return useQuery({
@@ -10,10 +10,21 @@ export function useTables(branchId) {
   });
 }
 
-export function useUpdateTableStatus(branchId) {
+export function useReleaseTable() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ tableId, status }) => updateTableStatus(tableId, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tables", branchId] }),
+    mutationFn: releaseTable,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tables"] }),
+  });
+}
+
+export function useSaveTableLayout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ branchId, ...payload }) => saveTableLayout(branchId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tables"] });
+      queryClient.invalidateQueries({ queryKey: ["branches"] });
+    },
   });
 }
