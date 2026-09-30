@@ -1,646 +1,240 @@
 // src/pages/owner/TransactionsView.jsx
-import { useEffect, useMemo, useState } from "react";
-import { Bar } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Tooltip,
-  Legend,
-} from "chart.js";
+import { useCallback, useMemo, useState } from "react";
+import toast from "react-hot-toast";
+import { format } from "date-fns";
 import StatCard from "../../components/StatCard";
-import { getTransactionsData } from "../../api/mockOwner";
+import { useBranches } from "../../hooks/useBranches";
+import { useDebounce } from "../../hooks/useDebounce";
+import {
+  useTransactions, useTransactionSummary, useTransactionTrend, useExportTransactions,
+} from "../../hooks/useTransactions";
+import { buildBranchColors } from "../../utils/branchColors";
+import { formatPeso, paymentLabel } from "../../utils/format";
+import TrendChart from "./transactions/TrendChart";
+import TransactionsTable from "./transactions/TransactionsTable";
+import TransactionModal from "./transactions/TransactionModal";
+import ExportConfirmModal from "./transactions/ExportConfirmModal";
 
-// Register once per app — cheap to call on every module load, Chart.js dedupes it.
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
-
-// Match these to your .bar.navy / .bar.blue colors
-const BRANCH_COLORS = { Poblacion: "#1e3a8a", "San Roque": "#3b82f6" };
-const BRANCH_COLORS_FADED = { Poblacion: "#1e3a8a66", "San Roque": "#3b82f666" };
-
-const BRANCH_OPTIONS = ["All Branches", "Poblacion", "San Roque"];
-
-// value is what you'll send to the backend later; label is what the owner sees
 const PERIOD_OPTIONS = [
   { value: "today", label: "Today" },
-  { value: "last-week", label: "Last Week" },
-  { value: "last-month", label: "Last Month" },
-  { value: "last-year", label: "Last Year" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "365d", label: "Last 12 months" },
 ];
 
-const PAGE_SIZE_OPTIONS = [8, 15, 25, 50];
+const TYPE_OPTIONS = [
+  { value: "all", label: "All types" },
+  { value: "dine-in", label: "Dine-in" },
+  { value: "take-out", label: "Take-out" },
+  { value: "delivery", label: "Delivery" },
+];
 
-const peso = (n) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const PAYMENT_ORDER = ["cash", "gcash"];
 
-// "11:42 AM" -> a real Date so it sorts chronologically, not alphabetically.
-function parseTimeOfDay(timeStr) {
-  const t = Date.parse(`1970/01/01 ${timeStr}`);
-  return Number.isNaN(t) ? 0 : t;
-}
+function PaymentLines({ payments }) {
+  const amounts = new Map(payments.map((p) => [p.method, p.amount]));
+  const methods = [
+    ...PAYMENT_ORDER,
+    ...payments.map((p) => p.method).filter((m) => !PAYMENT_ORDER.includes(m)),
+  ];
 
-function badgeClassForType(type) {
-  if (type === "Dine-in") return "badge-dinein";
-  if (type === "Take-out") return "badge-takeout";
-  if (type === "Delivery") return "badge-delivery";
-  return "";
-}
-
-function badgeClassForBranch(branch) {
-  return branch === "Poblacion" ? "badge-poblacion" : "badge-sanroque";
-}
-
-function badgeClassForPayment(payment) {
-  if (payment === "Card") return "badge-card";
-  return "badge-cash";
-}
-
-function downloadCsv(rows) {
-  const header = ["Order #", "Branch", "Cashier", "Time", "Type", "Total", "Payment"];
-  const body = rows.map((r) => [r.id, r.branch, r.cashier, r.time, r.type, r.total.toFixed(2), r.payment]);
-  const csv = [header, ...body].map((line) => line.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-function SortHeader({ label, sortKey, activeKey, dir, onSort, className }) {
-  const isActive = activeKey === sortKey;
-  return (
-    <th className={className}>
-      <button type="button" className={`sort-btn ${isActive ? "sort-active" : ""}`} onClick={() => onSort(sortKey)}>
-        {label}
-        <span className="sort-arrow">{isActive ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
-      </button>
-    </th>
-  );
-}
-
-function ExportConfirmModal({ count, onCancel, onConfirm }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onCancel();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        className="modal-card modal-confirm"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Confirm export"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h3 className="modal-title">Export transactions?</h3>
-          <button type="button" className="modal-close" onClick={onCancel} aria-label="Close">
-            ✕
-          </button>
-        </div>
-
-        <p className="modal-subtitle">
-          This will download a CSV of {count} transaction{count === 1 ? "" : "s"} matching your current
-          filters and search.
-        </p>
-
-        <div className="confirm-actions">
-          <button type="button" className="btn-outline" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" className="btn-solid" onClick={onConfirm}>
-            ⬇ Export CSV
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TransactionModal({ row, onClose }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Transaction ${row.id}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <h3 className="modal-title">Transaction {row.id}</h3>
-            <div className="modal-subtitle">{row.time}</div>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </div>
-
-        <dl className="modal-grid">
-          <div>
-            <dt>Branch</dt>
-            <dd>
-              <span className={`badge ${badgeClassForBranch(row.branch)}`}>{row.branch}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Cashier</dt>
-            <dd>{row.cashier}</dd>
-          </div>
-          <div>
-            <dt>Type</dt>
-            <dd>
-              <span className={`badge ${badgeClassForType(row.typeKey)}`}>{row.type}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Payment</dt>
-            <dd>
-              <span className={`badge ${badgeClassForPayment(row.payment)}`}>{row.payment}</span>
-            </dd>
-          </div>
-        </dl>
-
-        {row.items && row.items.length > 0 ? (
-          <div className="modal-items">
-            <div className="modal-items-head">
-              <span>Item</span>
-              <span>Amount</span>
-            </div>
-            {row.items.map((item) => (
-              <div className="modal-items-row" key={item.name}>
-                <span>
-                  {item.qty}× {item.name}
-                </span>
-                <span>{peso(item.price * item.qty)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="modal-muted">No item details available.</p>
-        )}
-
-        <div className="modal-total">
-          <span>Total</span>
-          <span>{peso(row.total)}</span>
-        </div>
-
-        <button type="button" className="modal-done" onClick={onClose}>
-          Done
-        </button>
-      </div>
-    </div>
-  );
+  return methods.map((method) => (
+    <span key={method} style={{ display: "block" }}>
+      {paymentLabel(method)} {formatPeso(amounts.get(method) ?? 0)}
+    </span>
+  ));
 }
 
 export default function TransactionsView() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [branch, setBranch] = useState("All Branches");
-  const [period, setPeriod] = useState("today"); // UI only for now — not wired to data yet
-  const [selectedRow, setSelectedRow] = useState(null);
-  const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState(null); // "time" | "total" | null
-  const [sortDir, setSortDir] = useState("asc");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
-  const [showExportConfirm, setShowExportConfirm] = useState(false);
+  const [branchId, setBranchId] = useState("all");
+  const [period, setPeriod] = useState("today");
+  const [orderType, setOrderType] = useState("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [sort, setSort] = useState("time");
+  const [dir, setDir] = useState("desc");
+  const [pageSize, setPageSize] = useState(25);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [showExport, setShowExport] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    getTransactionsData()
-      .then((d) => !cancelled && setData(d))
-      .catch((err) => !cancelled && setError(err.message));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const search = useDebounce(searchInput.trim(), 300);
 
-  // Safe fallbacks so the hooks below always run, whether or not `data` has loaded yet.
-  // (Hooks must be called in the same order on every render — an early return above
-  // this point would skip hooks on the loading/error render and break that rule.)
-  const weeklyTrend = data?.weeklyTrend ?? [];
-  const allRows = data?.rows ?? [];
-  const isAll = branch === "All Branches";
-  const showPoblacion = isAll || branch === "Poblacion";
-  const showSanRoque = isAll || branch === "San Roque";
+  const { data: branches = [] } = useBranches();
+  const colors = useMemo(() => buildBranchColors(branches), [branches]);
 
-  // Chart.js wants one dataset per series, not per-row objects — built once per data/branch change
-  // so large datasets (thousands of points) aren't reshaped on every render.
-  // Both datasets always exist so their legend entries stay clickable; `hidden` (not
-  // omission) is what reflects the branch filter, so clicking a hidden legend item
-  // can bring it back.
-  const chartData = useMemo(
-    () => ({
-      labels: weeklyTrend.map((d) => d.day),
-      datasets: [
-        {
-          label: "Poblacion",
-          data: weeklyTrend.map((d) => d.poblacion),
-          backgroundColor: weeklyTrend.map((d) =>
-            d.projected ? BRANCH_COLORS_FADED.Poblacion : BRANCH_COLORS.Poblacion
-          ),
-          borderRadius: 4,
-          maxBarThickness: 28,
-          hidden: !showPoblacion,
-        },
-        {
-          label: "San Roque",
-          data: weeklyTrend.map((d) => d.sanRoque),
-          backgroundColor: weeklyTrend.map((d) =>
-            d.projected ? BRANCH_COLORS_FADED["San Roque"] : BRANCH_COLORS["San Roque"]
-          ),
-          borderRadius: 4,
-          maxBarThickness: 28,
-          hidden: !showSanRoque,
-        },
-      ],
-    }),
-    [weeklyTrend, showPoblacion, showSanRoque]
-  );
+  // The chart ignores the branch and search filters so branches stay comparable side by side.
+  const scope = { period, orderType: orderType === "all" ? undefined : orderType };
+  const filters = { ...scope, branchId: branchId === "all" ? undefined : branchId, search: search || undefined };
+  const listParams = { ...filters, sort, dir, pageSize };
 
-  const chartOptions = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      parsing: true,
-      normalized: true,
-      interaction: { mode: "index", intersect: false },
-      // Clicking an actual bar filters by that bar's branch — same behavior as the
-      // legend click below, so either one keeps the whole page (table, stat cards,
-      // CSV export) in sync. `nearest` + `intersect: true` here (deliberately
-      // different from the hover/tooltip `interaction` above) means only a bar the
-      // cursor is actually over counts as a click, not just the nearest category.
-      onClick: (event, _activeElements, chart) => {
-        const points = chart.getElementsAtEventForMode(event, "nearest", { intersect: true }, true);
-        if (!points.length) return;
-        const clicked = chart.data.datasets[points[0].datasetIndex].label;
-        setBranch((prev) => (prev === clicked ? "All Branches" : clicked));
-        setPage(1);
-      },
-      onHover: (event, activeElements) => {
-        if (event.native?.target) {
-          event.native.target.style.cursor = activeElements.length ? "pointer" : "default";
-        }
-      },
-      plugins: {
-        legend: {
-          position: "top",
-          labels: { usePointStyle: true, boxWidth: 8 },
-          // Clicking a branch in the legend drives the same `branch` filter as the
-          // dropdown, instead of Chart.js's default per-dataset show/hide toggle —
-          // so the chart, table, and stat cards never fall out of sync. Clicking the
-          // branch that's already selected clears the filter back to "All Branches".
-          onClick: (_event, legendItem) => {
-            const clicked = legendItem.text;
-            setBranch((prev) => (prev === clicked ? "All Branches" : clicked));
-            setPage(1);
-          },
-          onHover: (event) => {
-            if (event.native?.target) event.native.target.style.cursor = "pointer";
-          },
-          onLeave: (event) => {
-            if (event.native?.target) event.native.target.style.cursor = "default";
-          },
-        },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${peso(ctx.parsed.y ?? 0)}` } },
-      },
-      scales: {
-        x: { grid: { display: false } },
-        y: { beginAtZero: true, grid: { color: "#eee" }, ticks: { callback: (v) => `₱${v}` } },
-      },
-    }),
+  const filterKey = JSON.stringify(listParams);
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 });
+  const requestedPage = pageState.key === filterKey ? pageState.page : 1;
+
+  const list = useTransactions({ ...listParams, page: requestedPage });
+  const summary = useTransactionSummary(filters);
+  const trend = useTransactionTrend(scope);
+  const exportCsv = useExportTransactions();
+
+  const page = list.data?.page ?? requestedPage; // the server clamps pages past the end
+  const goToPage = (p) => setPageState({ key: filterKey, page: p });
+
+  const toggleBranch = useCallback(
+    (id) => setBranchId((prev) => (prev === String(id) ? "all" : String(id))),
     []
   );
 
-  // Branch filter -> search -> sort, in that order. Memoized since this is the
-  // step that matters most once there are thousands of rows.
-  const filteredSortedRows = useMemo(() => {
-    let result = isAll ? allRows : allRows.filter((r) => r.branch === branch);
-
-    const q = search.trim().toLowerCase();
-    if (q) {
-      result = result.filter(
-        (r) =>
-          r.id.toLowerCase().includes(q) ||
-          r.cashier.toLowerCase().includes(q) ||
-          r.total.toFixed(2).includes(q)
-      );
+  function handleSort(key) {
+    if (sort === key) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSort(key);
+      setDir("desc"); // newest / largest first
     }
+  }
 
-    if (sortKey) {
-      const dir = sortDir === "asc" ? 1 : -1;
-      result = [...result].sort((a, b) => {
-        if (sortKey === "total") return (a.total - b.total) * dir;
-        if (sortKey === "time") return (parseTimeOfDay(a.time) - parseTimeOfDay(b.time)) * dir;
-        return 0;
-      });
-    }
+  const hasActiveFilters = branchId !== "all" || orderType !== "all" || period !== "today" || searchInput !== "";
 
-    return result;
-  }, [allRows, isAll, branch, search, sortKey, sortDir]);
+  function clearFilters() {
+    setBranchId("all");
+    setOrderType("all");
+    setPeriod("today");
+    setSearchInput("");
+    setSort("time");
+    setDir("desc");
+  }
 
-  const totalRows = filteredSortedRows.length;
-  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
-  const safePage = Math.min(page, pageCount);
-  const pagedRows = useMemo(() => {
-    const start = (safePage - 1) * pageSize;
-    return filteredSortedRows.slice(start, start + pageSize);
-  }, [filteredSortedRows, safePage, pageSize]);
-
-  if (error) return <p className="error-text">Couldn't load transactions. {error}</p>;
-  if (!data) {
-    return (
-      <>
-        <div className="view-header">
-          <h2 className="view-title">All Transactions</h2>
-        </div>
-
-        <div className="stat-grid stat-grid-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="skeleton skeleton-stat-card" />
-          ))}
-        </div>
-
-        <div className="panel">
-          <div className="skeleton skeleton-title" />
-          <div className="skeleton skeleton-chart" />
-        </div>
-
-        <div className="panel table-panel">
-          <div className="skeleton skeleton-title" />
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="skeleton skeleton-line" />
-          ))}
-        </div>
-      </>
+  function handleExport() {
+    exportCsv.mutate(
+      {
+        params: { ...filters, sort, dir },
+        filename: `transactions-${period}-${format(new Date(), "yyyyMMdd-HHmm")}.csv`,
+      },
+      {
+        onSuccess: () => {
+          setShowExport(false);
+          toast.success("Export downloaded");
+        },
+        onError: (err) => toast.error(err.message),
+      }
     );
   }
 
-  const stats = (!isAll && data.branchStats?.[branch]) || data.stats;
-
-  const handleSort = (key) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-    setPage(1);
-  };
-
-  const clearFilters = () => {
-    setBranch("All Branches");
-    setPeriod("today");
-    setSearch("");
-    setSortKey(null);
-    setSortDir("asc");
-    setPage(1);
-  };
-
-  const hasActiveFilters = branch !== "All Branches" || search.trim() !== "" || sortKey !== null;
-
-  const rangeStart = totalRows === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(safePage * pageSize, totalRows);
+  const periodLabel = PERIOD_OPTIONS.find((p) => p.value === period)?.label;
+  const branchLabel =
+    branchId === "all" ? "All branches" : branches.find((b) => String(b.branch_id) === branchId)?.branch_name ?? "";
+  const s = summary.data;
 
   return (
     <>
       <div className="view-header">
         <h2 className="view-title">All Transactions</h2>
         <div className="view-filters">
-          <select
-            className="select-input"
-            value={branch}
-            onChange={(e) => {
-              setBranch(e.target.value);
-              setPage(1);
-            }}
-            aria-label="Filter by branch"
-          >
-            {BRANCH_OPTIONS.map((b) => (
-              <option key={b} value={b}>
-                {b}
+          <select className="select-input" value={branchId} onChange={(e) => setBranchId(e.target.value)} aria-label="Filter by branch">
+            <option value="all">All branches</option>
+            {branches.map((b) => (
+              <option key={b.branch_id} value={String(b.branch_id)}>
+                {b.branch_name}{b.is_active ? "" : " (inactive)"}
               </option>
             ))}
           </select>
 
-          {/* TODO: pass `period` to getTransactionsData({ branch, period }) once the backend supports it */}
-          <select
-            className="select-input"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            aria-label="Filter by period"
-          >
-            {PERIOD_OPTIONS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
+          <select className="select-input" value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Filter by period">
+            {PERIOD_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+
+          <select className="select-input" value={orderType} onChange={(e) => setOrderType(e.target.value)} aria-label="Filter by order type">
+            {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="stat-grid stat-grid-4">
-        <StatCard label="Total Today" value={peso(stats.totalToday)} />
-        <StatCard label="Count" value={stats.count} />
-        <StatCard label="Avg Order Value" value={peso(stats.avgOrder)} />
-        <StatCard label="GCash / Cash / Card" value={stats.paymentSplit} valueClassName="stat-value-sm" />
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">📊 Sales per Branch — Daily Trend (This Week)</h3>
-        <p className="panel-hint">Click a bar or legend item to filter the page by that branch.</p>
-        <div className="trend-chart-rc" style={{ width: "100%", height: 280 }}>
-          <Bar data={chartData} options={chartOptions} />
+      {summary.isLoading ? (
+        <div className="stat-grid stat-grid-4">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton skeleton-stat-card" />)}
         </div>
-      </div>
+      ) : summary.error && !s ? (
+        <p className="error-text">
+          Couldn't load totals. {summary.error.message}{" "}
+          <button type="button" className="btn-text" onClick={() => summary.refetch()}>Try again</button>
+        </p>
+      ) : (
+        <div className="stat-grid stat-grid-4">
+          <StatCard label="Total Sales" value={formatPeso(s.total_sales)} change={`${periodLabel} · ${branchLabel}`} changeType="muted" />
+          <StatCard label="Transactions" value={s.count} />
+          <StatCard label="Avg Order Value" value={formatPeso(s.avg_order_value)} />
+          <StatCard
+            label="Payments"
+            value={<PaymentLines payments={s.by_payment} />}
+            valueClassName="stat-value-sm"
+          />
+        </div>
+      )}
+
+      <TrendChart
+        trend={trend.data}
+        colors={colors}
+        selectedBranchId={branchId === "all" ? null : branchId}
+        onSelectBranch={toggleBranch}
+        isLoading={trend.isLoading}
+        error={trend.error}
+        onRetry={() => trend.refetch()}
+      />
 
       <div className="panel table-panel">
         <div className="table-toolbar">
           <div className="search-wrap">
-            <span className="search-icon" aria-hidden="true">
-              🔍
-            </span>
+            <span className="search-icon" aria-hidden="true">🔍</span>
             <input
               type="text"
               className="search-input"
-              placeholder="Search order #, cashier, or amount…"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
+              placeholder="Search order #, cashier, or customer…"
+              aria-label="Search transactions"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
-            {search && (
-              <button type="button" className="search-clear" onClick={() => setSearch("")} aria-label="Clear search">
-                ✕
-              </button>
+            {searchInput && (
+              <button type="button" className="search-clear" onClick={() => setSearchInput("")} aria-label="Clear search">✕</button>
             )}
           </div>
 
           {hasActiveFilters && (
-            <button type="button" className="btn-text" onClick={clearFilters}>
-              Clear filters
-            </button>
+            <button type="button" className="btn-text" onClick={clearFilters}>Clear filters</button>
           )}
 
-          <button type="button" className="btn-outline" onClick={() => setShowExportConfirm(true)}>
+          <button type="button" className="btn-outline" onClick={() => setShowExport(true)} disabled={!list.data?.total}>
             ⬇ Export CSV
           </button>
         </div>
 
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Order #</th>
-                <th>Branch</th>
-                <th>Cashier</th>
-                <SortHeader label="Time" sortKey="time" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                <th>Type</th>
-                <SortHeader
-                  label="Total"
-                  sortKey="total"
-                  activeKey={sortKey}
-                  dir={sortDir}
-                  onSort={handleSort}
-                  className="align-right"
-                />
-                <th>Payment</th>
-                <th className="align-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagedRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="empty-cell">
-                    <div className="empty-state">
-                      <span className="empty-icon" aria-hidden="true">
-                        🧾
-                      </span>
-                      <p>No transactions match your filters.</p>
-                      {hasActiveFilters && (
-                        <button type="button" className="btn-text" onClick={clearFilters}>
-                          Clear filters
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                pagedRows.map((row) => (
-                  <tr key={row.id} className="row-clickable" onClick={() => setSelectedRow(row)}>
-                    <td className="cell-strong">{row.id}</td>
-                    <td>
-                      <span className={`badge ${badgeClassForBranch(row.branch)}`}>{row.branch}</span>
-                    </td>
-                    <td>{row.cashier}</td>
-                    <td>{row.time}</td>
-                    <td>
-                      <span className={`badge ${badgeClassForType(row.typeKey)}`}>{row.type}</span>
-                    </td>
-                    <td className="align-right cell-strong">{peso(row.total)}</td>
-                    <td>
-                      <span className={`badge ${badgeClassForPayment(row.payment)}`}>{row.payment}</span>
-                    </td>
-                    <td className="align-right">
-                      <button
-                        type="button"
-                        className="btn-view"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedRow(row);
-                        }}
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {totalRows > 0 && (
-          <div className="table-pagination">
-            <div className="pagination-info">
-              Showing {rangeStart}–{rangeEnd} of {totalRows}
-              <select
-                className="select-input select-sm"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                aria-label="Rows per page"
-              >
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n} / page
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="pagination-controls">
-              <button type="button" className="btn-outline btn-sm" disabled={safePage <= 1} onClick={() => setPage(1)}>
-                « First
-              </button>
-              <button
-                type="button"
-                className="btn-outline btn-sm"
-                disabled={safePage <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                ‹ Prev
-              </button>
-              <span className="pagination-page">
-                Page {safePage} of {pageCount}
-              </span>
-              <button
-                type="button"
-                className="btn-outline btn-sm"
-                disabled={safePage >= pageCount}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next ›
-              </button>
-              <button
-                type="button"
-                className="btn-outline btn-sm"
-                disabled={safePage >= pageCount}
-                onClick={() => setPage(pageCount)}
-              >
-                Last »
-              </button>
-            </div>
-          </div>
-        )}
+        <TransactionsTable
+          rows={list.data?.rows ?? []}
+          total={list.data?.total ?? 0}
+          page={page}
+          pageCount={list.data?.page_count ?? 1}
+          pageSize={pageSize}
+          isLoading={list.isLoading}
+          isFetching={list.isFetching}
+          error={list.error}
+          onRetry={() => list.refetch()}
+          sort={sort}
+          dir={dir}
+          onSort={handleSort}
+          onPage={goToPage}
+          onPageSize={setPageSize}
+          onView={setSelectedOrderId}
+          colors={colors}
+          hasActiveFilters={hasActiveFilters}
+          onClear={clearFilters}
+        />
       </div>
 
-      {selectedRow && <TransactionModal row={selectedRow} onClose={() => setSelectedRow(null)} />}
-      {showExportConfirm && (
+      {selectedOrderId && <TransactionModal orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />}
+
+      {showExport && (
         <ExportConfirmModal
-          count={filteredSortedRows.length}
-          onCancel={() => setShowExportConfirm(false)}
-          onConfirm={() => {
-            downloadCsv(filteredSortedRows);
-            setShowExportConfirm(false);
-          }}
+          count={list.data?.total ?? 0}
+          busy={exportCsv.isPending}
+          onCancel={() => setShowExport(false)}
+          onConfirm={handleExport}
         />
       )}
     </>

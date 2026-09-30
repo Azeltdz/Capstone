@@ -8,7 +8,7 @@ import { useBranches } from "../../hooks/useBranches";
 import {
   useSettings, useUpdateSettings, useSecurityStatus, useReceiptSettings, useUpdateReceiptSettings,
 } from "../../hooks/useSettings";
-import { ANALYTICS_DEFAULTS, INVENTORY_ALERT_DEFAULTS, RECEIPT_DEFAULTS } from "../../constant/settingsDefaults";
+import { ANALYTICS_DEFAULTS, INVENTORY_ALERT_DEFAULTS, RECEIPT_DEFAULTS } from "../../constants/settingsDefaults";
 
 // ---------- Validation (mirrors the backend's express-validator rules) ----------
 // Inputs stay strings in the form; converted to numbers only when sending.

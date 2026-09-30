@@ -1,5 +1,5 @@
 // src/api/client.js
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE;
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -8,26 +8,31 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(path, options = {}) {
+export function toQuery(params = {}) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") q.set(key, String(value));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+async function request(path, options = {}) {
   const token = sessionStorage.getItem("token");
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(typeof options.body === "string" ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
 
-  if (res.status === 401) {
-    if (token) {
-      sessionStorage.clear();
-      window.location.href = "/";
-      throw new ApiError("Session expired", 401);
-    }
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.message || "Invalid credentials", 401);
+  if (res.status === 401 && token) {
+    sessionStorage.clear();
+    window.location.href = "/";
+    throw new ApiError("Session expired", 401);
   }
 
   if (!res.ok) {
@@ -39,6 +44,23 @@ export async function apiFetch(path, options = {}) {
     throw new ApiError(message, res.status);
   }
 
+  return res;
+}
+
+export async function apiFetch(path, options = {}) {
+  const res = await request(path, options);
   const text = await res.text();
   return text ? JSON.parse(text) : null;
+}
+
+export async function apiDownload(path, filename) {
+  const res = await request(path);
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

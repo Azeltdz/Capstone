@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { getMenuItems } from "../api/menu";
-import { getCategoryMeta } from "../constant/categoryMeta";
+import { getCategoryMeta } from "../constants/categoryMeta";
 
 export function useMenuItems() {
   return useQuery({
