@@ -1,26 +1,12 @@
-import { useRef } from "react";
 import { format } from "date-fns";
-import { useReactToPrint } from "react-to-print";
 import { useOrder } from "../../../hooks/useOrders";
-import { useReceiptSettings } from "../../../hooks/useSettings";
 import { useModal } from "../../../hooks/useModal";
-import { RECEIPT_DEFAULTS } from "../../../constants/settingsDefaults";
+import PrintReceiptButton from "../../../components/receipt/PrintReceiptButton";
 import { formatOrderNumber, formatPeso, ORDER_TYPE_LABELS, paymentLabel } from "../../../utils/format";
-import Receipt from "./Receipt";
 
 export default function TransactionModal({ orderId, onClose }) {
   useModal(onClose);
-
   const { data: order, isLoading, error } = useOrder(orderId);
-  const { data: saved } = useReceiptSettings(order?.branch_id);
-
-  const settings = {
-    business_name: saved?.business_name || RECEIPT_DEFAULTS.business_name,
-    footer_message: saved?.footer_message ?? RECEIPT_DEFAULTS.footer_message,
-  };
-
-  const receiptRef = useRef(null);
-  const print = useReactToPrint({ contentRef: receiptRef, documentTitle: formatOrderNumber(orderId) });
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -34,7 +20,9 @@ export default function TransactionModal({ orderId, onClose }) {
         <div className="modal-header">
           <div>
             <h3 className="modal-title" id="txn-modal-title">Transaction {formatOrderNumber(orderId)}</h3>
-            {order && <div className="modal-subtitle">{format(new Date(order.transaction_at), "MMMM d, yyyy h:mm a")}</div>}
+            {order && (
+              <div className="modal-subtitle">{format(new Date(order.transaction_at), "MMMM d, yyyy h:mm a")}</div>
+            )}
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
@@ -72,17 +60,11 @@ export default function TransactionModal({ orderId, onClose }) {
               <span>Total</span>
               <span>{formatPeso(order.total_amount)}</span>
             </div>
-
-            <div style={{ display: "none" }}>
-              <Receipt ref={receiptRef} order={order} settings={settings} />
-            </div>
           </>
         )}
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" className="btn-outline" onClick={() => print()} disabled={!order}>
-            🖨 Print receipt
-          </button>
+          <PrintReceiptButton orderId={orderId} copy />
           <button type="button" className="modal-done" onClick={onClose} autoFocus>Close</button>
         </div>
       </div>

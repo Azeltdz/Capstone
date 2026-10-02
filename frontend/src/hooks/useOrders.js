@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { placeOrder, getOrders, getOrderById } from "../api/orders";
+import { placeOrder, getOrders, getOrderById, getReceipt } from "../api/orders";
 
 export function usePlaceOrder() {
   const queryClient = useQueryClient();
@@ -9,9 +9,9 @@ export function usePlaceOrder() {
       // Placing an order changes tables (occupied) and inventory (deducted) too
       queryClient.invalidateQueries({ queryKey: ["tables"] });
       queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["menu-items"] });
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      
     },
   });
 }
@@ -29,5 +29,14 @@ export function useOrder(id) {
     queryKey: ["orders", "detail", id],
     queryFn: () => getOrderById(id),
     enabled: !!id,
+  });
+}
+
+export function useReceipt(id) {
+  return useQuery({
+    queryKey: ["orders", "receipt", id],
+    queryFn: () => getReceipt(id),
+    enabled: !!id,
+    staleTime: 60 * 1000,
   });
 }

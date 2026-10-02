@@ -2,7 +2,7 @@ const PAYMENT_METHODS = ["Cash", "GCash"];
 
 export default function CartPanel({
   orderId, step, orderType, customer, table, cart, onQtyChange,
-  paymentMethod, onSelectPayment, onPlaceOrder, isPlacing,
+  paymentMethod, onSelectPayment, onPlaceOrder, onCancel, isPlacing,
 }) {
   const lines = Object.values(cart);
   const itemCount = lines.reduce((sum, l) => sum + l.qty, 0);
@@ -95,10 +95,10 @@ export default function CartPanel({
           </div>
 
           <div className="order-actions">
-            <button className="btn btn-outline" onClick={() => alert("Receipt would print here.")} disabled={lines.length === 0}>
-              Print Receipt
+            <button type="button" className="btn btn-outline" onClick={onCancel} disabled={lines.length === 0 || isPlacing}>
+              Cancel Order
             </button>
-            <button className="btn btn-navy" onClick={onPlaceOrder} disabled={!canPlaceOrder}>
+            <button type="button" className="btn btn-navy" onClick={onPlaceOrder} disabled={!canPlaceOrder}>
               {isPlacing ? "Placing…" : "Place Order"}
             </button>
           </div>

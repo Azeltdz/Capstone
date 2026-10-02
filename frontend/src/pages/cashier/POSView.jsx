@@ -96,12 +96,21 @@ export default function POSView() {
 
     submitOrder(payload, {
       onSuccess: (data) => {
-        setPlacedOrder({ ...data.order, customer });
+        setPlacedOrder(data.order);
       },
-      onError: (err) => {
-        toast.error(err.message || "Could not place order.");
-      },
+    onError: (err) => {
+      toast.error(
+        err.status >= 500 || err.status === undefined
+          ? "Couldn't confirm the order. Check the Orders page before trying again, in case it was saved."
+          : err.message
+      );
+    },
     });
+  }
+
+  function handleCancelOrder() {
+    if (Object.keys(cart).length > 0 && !window.confirm("Discard this order and start over?")) return;
+    resetOrder();
   }
 
   function backFromMenu() {
@@ -136,6 +145,7 @@ export default function POSView() {
         paymentMethod={paymentMethod}
         onSelectPayment={setPaymentMethod}
         onPlaceOrder={handlePlaceOrder}
+        onCancel={handleCancelOrder}
         isPlacing={isPlacingOrder}
       />
 

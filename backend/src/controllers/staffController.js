@@ -1,5 +1,6 @@
 const { getAllStaff, getStaffByBranch, findUserById, updateUser } = require('../models/userModel');
 const { createStaffAccount } = require('../services/userService');
+const { invalidateUserCache } = require('../middleware/authMiddleware')
 
 // GET /api/staff  (owner only — ?branchId= optional filter)
 async function listStaff(req, res, next) {
@@ -39,6 +40,7 @@ async function editStaff(req, res, next) {
     const { id } = req.params;
     const staff = await updateUser(id, req.body);
     if (!staff) return res.status(404).json({ message: 'Staff not found' });
+    invalidateUserCache(id);
     res.json({ message: 'Staff updated', staff });
   } catch (err) {
     next(err);
@@ -56,6 +58,7 @@ async function deactivateStaff(req, res, next) {
 
     const staff = await updateUser(id, { is_active: false });
     if (!staff) return res.status(404).json({ message: 'Staff not found' });
+    invalidateUserCache(id);
     res.json({ message: 'Staff deactivated', staff });
   } catch (err) {
     next(err);
@@ -67,6 +70,7 @@ async function activateStaff(req, res, next) {
   try {
     const staff = await updateUser(req.params.id, { is_active: true });
     if (!staff) return res.status(404).json({ message: 'Staff not found' });
+    invalidateUserCache(id);
     res.json({ message: 'Staff reactivated', staff });
   } catch (err) {
     next(err);

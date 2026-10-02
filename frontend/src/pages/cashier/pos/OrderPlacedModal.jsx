@@ -1,33 +1,25 @@
-import { useEffect } from "react";
-
-const peso = (n) => `₱${Number(n).toFixed(2)}`;
-
-const ORDER_TYPE_LABELS = { "dine-in": "Dine-in", "take-out": "Take-out", "delivery": "Delivery" };
+// src/pages/cashier/pos/OrderPlacedModal.jsx
+import { format } from "date-fns";
+import { useModal } from "../../../hooks/useModal";
+import PrintReceiptButton from "../../../components/receipt/PrintReceiptButton";
+import { formatOrderNumber, formatPeso, ORDER_TYPE_LABELS, paymentLabel } from "../../../utils/format";
 
 export default function OrderPlacedModal({ order, onClose }) {
-  useEffect(() => {
-    function onKeyDown(e) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  useModal(onClose);
 
   const {
-    transaction_id, order_type, table_number, payment_method,
-    transaction_at, items, total_amount, customer,
+    transaction_id, order_type, table_number, customer_name, guest_count,
+    payment_method, transaction_at, items, total_amount,
   } = order;
-
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
 
   const details = [
-    ["Order type", ORDER_TYPE_LABELS[order_type] || order_type],
+    ["Order type", ORDER_TYPE_LABELS[order_type] ?? order_type],
     table_number ? ["Table", `Table ${table_number}`] : null,
-    customer ? ["Customer", customer.name] : null,
-    customer?.phone ? ["Phone", customer.phone] : null,
-    customer ? ["Guests", `${customer.guests} ${customer.guests === 1 ? "Person" : "People"}`] : null,
-    ["Payment", payment_method],
-    ["Placed", new Date(transaction_at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })],
+    customer_name ? ["Customer", customer_name] : null,
+    guest_count ? ["Guests", `${guest_count} ${guest_count === 1 ? "Person" : "People"}`] : null,
+    ["Payment", paymentLabel(payment_method)],
+    ["Placed", format(new Date(transaction_at), "MMM d, yyyy h:mm a")],
   ].filter(Boolean);
 
   return (
@@ -36,7 +28,7 @@ export default function OrderPlacedModal({ order, onClose }) {
         <div className="modal-header">
           <div>
             <h3 id="order-placed-title">Order Placed</h3>
-            <span className="receipt-id">#TXN-{String(transaction_id).padStart(4, "0")}</span>
+            <span className="receipt-id">{formatOrderNumber(transaction_id)}</span>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
@@ -57,7 +49,7 @@ export default function OrderPlacedModal({ order, onClose }) {
                 <span className="receipt-item-name">
                   {line.item_name} <span className="receipt-item-qty">×{line.quantity}</span>
                 </span>
-                <span>{peso(line.subtotal)}</span>
+                <span>{formatPeso(line.subtotal)}</span>
               </li>
             ))}
           </ul>
@@ -65,11 +57,17 @@ export default function OrderPlacedModal({ order, onClose }) {
           <div className="receipt-summary">
             <div className="receipt-row receipt-total">
               <dt>Total ({itemCount} items)</dt>
-              <dd>{peso(total_amount)}</dd>
+              <dd>{formatPeso(total_amount)}</dd>
             </div>
           </div>
 
-          <button type="button" className="btn btn-navy modal-submit" onClick={onClose}>Done</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* the original receipt: no REPRINT mark */}
+            <PrintReceiptButton orderId={transaction_id} className="btn btn-outline" style={{ flex: 1 }} />
+            <button type="button" className="btn btn-navy" style={{ flex: 1 }} onClick={onClose} autoFocus>
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

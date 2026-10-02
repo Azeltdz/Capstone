@@ -3,6 +3,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { useOrders, useOrder } from "../../hooks/useOrders";
 import { useDebounce } from "../../hooks/useDebounce";
+import PrintReceiptButton from "../../components/receipt/PrintReceiptButton";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
@@ -139,7 +140,7 @@ function OrderDetailsModal({ orderId, onClose }) {
               {order.items.map((it) => (
                 <div className="modal-items-row" key={it.tx_item_id}>
                   <span>{it.item_name}</span>
-                  <span>×{it.quantity}</span>
+                  <span>x{it.quantity}</span>
                 </div>
               ))}
             </div>
@@ -151,7 +152,10 @@ function OrderDetailsModal({ orderId, onClose }) {
           </>
         )}
 
-        <button className="modal-done" onClick={onClose}>Close</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <PrintReceiptButton orderId={orderId} copy />
+          <button className="modal-done" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );

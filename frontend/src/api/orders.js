@@ -18,3 +18,5 @@ export function getOrders(params = {}) {
 export function getOrderById(id) {
   return apiFetch(`/api/orders/${id}`);
 }
+
+export const getReceipt = (id) => apiFetch(`/api/orders/${id}/receipt`);

@@ -1,10 +1,12 @@
-const { body, validationResult } = require('express-validator');
+const { body, param, validationResult } = require('express-validator');
 
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
   next();
 };
+
+const orderIdRule = [param('id').isInt({ min: 1 }).withMessage('Invalid order'), validate];
 
 const placeOrderRules = [
   body("customer_name").optional({ nullable: true }).isString().trim().isLength({ min: 1, max: 100 }).withMessage("customer_name must be 1-100 characters"),
@@ -23,4 +25,4 @@ const placeOrderRules = [
   validate,
 ];
 
-module.exports = { placeOrderRules };
+module.exports = { placeOrderRules, orderIdRule };
