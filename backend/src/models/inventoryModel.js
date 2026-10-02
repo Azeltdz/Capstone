@@ -93,7 +93,7 @@ async function getLowStockAll() {
       FROM inventory inv
       JOIN ingredients ing ON ing.ingredient_id = inv.ingredient_id
       JOIN branches b ON b.branch_id = inv.branch_id
-      WHERE inv.quantity_on_hand <= inv.reorder_threshold
+      WHERE inv.quantity_on_hand <= inv.reorder_threshold AND b.is_active = true
       ORDER BY b.branch_name, (inv.quantity_on_hand - inv.reorder_threshold) ASC`
   );
   return rows;

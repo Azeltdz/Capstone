@@ -21,11 +21,12 @@ export function useInventoryList(branchId) {
   });
 }
 
-export function useLowStock(branchId) {
+export function useLowStock(branchId, options = {}) {
   const scope = branchId && branchId !== "all" ? branchId : "all";
   return useQuery({
     queryKey: ["inventory", "low-stock", scope],
     queryFn: () => (scope === "all" ? getLowStockAllBranches() : getLowStockByBranch(scope)),
+    ...options,
   });
 }
 

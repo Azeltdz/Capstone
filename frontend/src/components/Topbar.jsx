@@ -1,31 +1,13 @@
-// src/components/Topbar.jsx
-import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useMinuteClock } from "../hooks/useMinuteClock";
+import { formatClock, formatLongDate, initialsOf } from "../utils/format";
 
-function useClock() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setTime(new Date()), 30000);
-    return () => clearInterval(id);
-  }, []);
-  return time;
-}
+const ROLE_LABEL = { owner: "Owner", cashier: "Cashier" };
 
-function formatTime(date) {
-  let hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${hours}:${minutes} ${ampm}`;
-}
-
-export default function Topbar({ branchLabel, showClock = false, dateLabel }) {
+export default function Topbar({ branchLabel, showClock = false, showDate = false }) {
   const { user } = useAuth();
-  const time = useClock();
-
-  const initials = user?.fullName
-    ? user.fullName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()
-    : "??";
+  const now = useMinuteClock();
+  const isOwner = user?.role === "owner";
 
   return (
     <header className="topbar">
@@ -34,24 +16,28 @@ export default function Topbar({ branchLabel, showClock = false, dateLabel }) {
           Filipee's <span className="brand-accent">Bistro</span>
         </h1>
         <span className="pill pill-branch">
-          <i className="icon">{user?.role === "owner" ? "🌐" : "🏬"}</i> {branchLabel}
+          <i className="icon" aria-hidden="true">{isOwner ? "🌐" : "🏬"}</i> {branchLabel}
         </span>
         {showClock && (
           <span className="pill pill-time">
-            <i className="icon">🕐</i> {formatTime(time)}
+            <i className="icon" aria-hidden="true">🕐</i>{" "}
+            <time dateTime={now.toISOString()}>{formatClock(now)}</time>
           </span>
         )}
-        {dateLabel && (
+        {showDate && (
           <span className="pill pill-date">
-            <i className="icon">📅</i> {dateLabel}
+            <i className="icon" aria-hidden="true">📅</i>{" "}
+            <time dateTime={now.toISOString()}>{formatLongDate(now)}</time>
           </span>
         )}
       </div>
 
       <div className="topbar-right">
-        <span className={`avatar ${user?.role === "owner" ? "avatar-owner" : ""}`}>{initials}</span>
+        <span className={`avatar ${isOwner ? "avatar-owner" : ""}`} aria-hidden="true">
+          {initialsOf(user?.full_name)}
+        </span>
         <span className="user-info">
-          {user?.fullName} <span className="dot">·</span> {user?.role === "owner" ? "Admin" : "Cashier"}
+          {user?.full_name} <span className="dot">·</span> {ROLE_LABEL[user?.role] ?? ""}
         </span>
       </div>
     </header>

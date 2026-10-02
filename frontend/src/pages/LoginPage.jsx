@@ -18,7 +18,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
 
   async function handleLogin() {
@@ -34,7 +34,7 @@ export default function LoginPage() {
 
       if (user.role !== role) {
         setError(`This account is registered as ${user.role}, not ${role}.`);
-        sessionStorage.clear();
+        logout();
         setLoading(false);
         return;
       }

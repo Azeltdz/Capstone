@@ -1,15 +1,28 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
+const { findUserById } = require('../models/userModel');
 
-function protect(req, res, next) {
-  const token = req.cookies?.token || req.headers.authorization?.split(' ')[1];
+async function protect(req, res, next) {
+  const header = req.headers.authorization;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : req.cookies?.token;
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
 
+  let decoded;
   try {
-    req.user = jwt.verify(token, config.accessTokenSecret);
-    next();
+    decoded = jwt.verify(token, config.accessTokenSecret);
   } catch {
-    res.status(401).json({ message: 'Invalid or expired token' });
+    return res.status(401).json({ message: 'Invalid or expired token' });
+  }
+
+  try {
+    const user = await findUserById(decoded.user_id);
+    if (!user || !user.is_active) {
+      return res.status(401).json({ message: 'Account inactive or not found' });
+    }
+    req.user = { user_id: user.user_id, role: user.role, branch_id: user.branch_id };
+    next();
+  } catch (err) {
+    next(err);
   }
 }
 
