@@ -10,6 +10,7 @@ const { getAllSystemSettings } = require('../models/settingsModel');
 const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
 const { getBranchPaceStats } = require('../models/analyticsModel');
 const { evaluatePace } = require('../utils/anomaly');
+const { clearUserCache } = require('../middleware/authMiddleware');
 
 // GET /api/branches
 async function listBranches(req, res, next) {
@@ -58,11 +59,13 @@ async function addBranch(req, res, next) {
 // PUT /api/branches/:id  (owner only)
 async function editBranch(req, res, next) {
   try {
+    clearUserCache();
     const { id } = req.params;
     const existing = await getBranchById(id);
     if (!existing) return res.status(404).json({ message: 'Branch not found' });
 
     const branch = await updateBranch(id, req.body);
+    clearUserCache();
     res.json({ message: 'Branch updated', branch });
   } catch (err) {
     next(err);

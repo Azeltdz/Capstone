@@ -287,8 +287,9 @@ export default function BranchesView() {
 
               {deleteTarget.is_active ? (
                 <p>
-                  <strong>{deleteTarget.branch_name}</strong> will be marked <strong>Deactivated</strong> and hidden
-                  from normal operations. It won't be permanently removed — you can reactivate it later, or delete it
+                  <strong>{deleteTarget.branch_name}</strong> will be marked <strong>Deactivated</strong> and hidden from normal operations. 
+                  Its cashiers are signed out and can't sign in or take orders until it is reactivated. 
+                  It won't be permanently removed — you can reactivate it later, or delete it
                   for good once it's deactivated.
                 </p>
               ) : (

@@ -1,7 +1,6 @@
 const {
-  getInventoryByBranch, getInventoryById, findInventoryEntry, createInventoryEntry,
-  updateInventoryEntry, adjustInventoryQuantity, getLowStockByBranch, getLowStockAll,
-  deleteInventoryEntry, getAllInventory
+  getInventoryByBranch, getAllInventory, getInventoryById, findInventoryEntry, createInventoryEntry,
+  updateInventoryEntry, getLowStockByBranch, getLowStockAll, recordMovement, listMovements, deleteInventoryEntry
 } = require('../models/inventoryModel');
 const { getBranchById } = require('../models/branchModel');
 const { getIngredientById } = require('../models/ingredientModel');
@@ -63,7 +62,9 @@ async function addInventoryEntry(req, res, next) {
       return res.status(409).json({ message: 'This ingredient already has an inventory record for this branch. Use PUT/PATCH to update it.' });
     }
 
-    const entry = await createInventoryEntry({ branch_id: branchId, ingredient_id, quantity_on_hand, reorder_threshold });
+    const entry = await createInventoryEntry({
+      branch_id: branchId, ingredient_id, quantity_on_hand, reorder_threshold, performed_by: req.user.user_id,
+    });
     res.status(201).json({ message: 'Inventory record created', entry });
   } catch (err) { next(err); }
 }
@@ -74,7 +75,7 @@ async function editInventory(req, res, next) {
     const existing = await getInventoryById(id);
     if (!existing) return res.status(404).json({ message: 'Inventory record not found' });
 
-    const entry = await updateInventoryEntry(id, req.body);
+    const entry = await updateInventoryEntry(id, { reorder_threshold: req.body.reorder_threshold });
     res.json({ message: 'Inventory updated', entry });
   } catch (err) { next(err); }
 }
@@ -108,7 +109,32 @@ async function removeInventoryEntry(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function addMovement(req, res, next) {
+  try {
+    const result = await recordMovement({
+      inventory_id: Number(req.params.id),
+      type: req.body.type,
+      quantity: Number(req.body.quantity),
+      unit: req.body.unit,
+      reason: req.body.reason?.trim(),
+      performed_by: req.user.user_id,
+    });
+    res.status(201).json({ message: 'Stock updated', ...result });
+  } catch (err) { next(err); }
+}
+
+async function getMovements(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!(await getInventoryById(id))) return res.status(404).json({ message: 'Inventory record not found' });
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 25;
+    const { rows, total } = await listMovements(id, pageSize, (page - 1) * pageSize);
+    res.json({ rows, total, page, page_size: pageSize, page_count: Math.max(1, Math.ceil(total / pageSize)) });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  listInventory, lowStockForBranch, lowStockAllBranches, listAllInventory,
-  addInventoryEntry, editInventory, adjustInventory, removeInventoryEntry,
+  listInventory, lowStockForBranch, lowStockAllBranches, listAllInventory, addInventoryEntry, 
+  editInventory, removeInventoryEntry, addMovement, getMovements
 };

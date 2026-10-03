@@ -1,6 +1,6 @@
 // src/pages/LoginPage.jsx
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import profilePic from "../assets/profile.jpg";
 
@@ -10,12 +10,19 @@ const EYE_OPEN_PATH =
 const EYE_SLASH_PATH =
   "M2.71 3.27 1.29 4.69l3.17 3.17A10.94 10.94 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.63 0 3.17-.31 4.57-.87l3.14 3.14 1.42-1.42L2.71 3.27zM12 17c-2.76 0-5-2.24-5-5 0-1.1.36-2.12.96-2.94l1.42 1.42A3 3 0 0 0 12 15c.39 0 .77-.08 1.11-.22l1.57 1.57c-.82.41-1.73.65-2.68.65zm2.97-2.97-1.46-1.46A3 3 0 0 0 12 9c-.39 0-.77.08-1.11.22L9.43 7.76A5 5 0 0 1 17 12c0 .75-.17 1.47-.47 2.03L14.97 14.03zM12 6.5c3.2 0 6.08 1.83 7.67 5.5-.44 1.01-1.05 1.9-1.79 2.65l1.42 1.42A12.2 12.2 0 0 0 23 12C21.27 7.61 17 4.5 12 4.5c-1.03 0-2.03.13-2.98.38l1.57 1.57c.46-.03.93-.05 1.41-.05z";
 
+const NOTICES = {
+  expired: "Your session expired. Please sign in again.",
+  account: "Your account was deactivated. Please contact the owner.",
+  branch: "Your branch is deactivated. Please contact the owner.",
+};
+
 export default function LoginPage() {
   const [role, setRole] = useState("owner");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [searchParams] = useSearchParams();
+  const [error, setError] = useState(() => NOTICES[searchParams.get("notice")] ?? "");
   const [loading, setLoading] = useState(false);
 
   const { login, logout } = useAuth();

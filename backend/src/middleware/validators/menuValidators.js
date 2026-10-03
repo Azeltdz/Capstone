@@ -1,18 +1,15 @@
-const fs = require('fs');
 const { body, param, validationResult } = require('express-validator');
+const { UNITS } = require('../../constants/units');
 
 const validate = (req, res, next) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    if (req.file) fs.unlink(req.file.path, () => {});
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
   next();
 };
 
 const ingredientRules = [
   body('ingredient_name').notEmpty().withMessage('ingredient_name is required'),
-  body('unit').notEmpty().withMessage('unit is required'),
+  body('unit').isIn(Object.keys(UNITS)).withMessage('Choose a unit from the list'),
   body('unit_cost').isFloat({ min: 0 }).withMessage('unit_cost must be a positive number'),
   validate,
 ];
@@ -60,6 +57,7 @@ const recipeRules = [
 const ingredientUpdateRules = [
   body('ingredient_name').optional().trim().notEmpty().withMessage('Name cannot be empty')
     .isLength({ max: 100 }).withMessage('Name must be under 100 characters'),
+  body('unit').optional().isIn(Object.keys(UNITS)).withMessage('Choose a unit from the list'),
   body('unit_cost').optional().isFloat({ min: 0, max: 1000000 }).withMessage('unit_cost must be 0 or more'),
   body('supplier_name').optional({ nullable: true }).isString().isLength({ max: 100 })
     .withMessage('Supplier must be under 100 characters'),

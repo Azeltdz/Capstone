@@ -4,6 +4,7 @@ import { format } from "date-fns";
 import { useOrders, useOrder } from "../../hooks/useOrders";
 import { useDebounce } from "../../hooks/useDebounce";
 import PrintReceiptButton from "../../components/receipt/PrintReceiptButton";
+import { manilaToday } from "../../utils/format";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
@@ -166,7 +167,7 @@ export default function OrdersView() {
   const [activePayment, setActivePayment] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounce(searchInput, 300);
-  const [date, setDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [date, setDate] = useState(() => manilaToday());
 
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const closeModal = useCallback(() => setSelectedOrderId(null), []);

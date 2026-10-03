@@ -3,37 +3,6 @@ const { findUserByUsername, findUserById, createUser } = require('../models/user
 const generateToken = require('../utils/generateToken');
 const config = require('../config/config');
 
-// async function register(req, res, next) {
-//   try {
-//     const { branch_id, full_name, user_name, password, role } = req.body;
-
-//     if (!full_name || !user_name || !password || !role) {
-//       return res.status(400).json({ message: 'Missing required fields' });
-//     }
-//     if (role === 'cashier' && !branch_id) {
-//       return res.status(400).json({ message: 'Cashier accounts must be assigned a branch' });
-//     }
-
-//     const existing = await findUserByUsername(user_name);
-//     if (existing) {
-//       return res.status(409).json({ message: 'Username already taken' });
-//     }
-
-//     const hashedPassword = await bcrypt.hash(password, 10);
-//     const newUser = await createUser({
-//       branch_id: role === 'owner' ? null : branch_id,
-//       full_name,
-//       user_name,
-//       hashedPassword,
-//       role
-//     });
-
-//     res.status(201).json({ message: 'Account created', user: newUser });
-//   } catch (err) {
-//     next(err);
-//   }
-// }
-
 async function login(req, res, next) {
   try {
     const { user_name, password } = req.body;
@@ -47,6 +16,15 @@ async function login(req, res, next) {
     }
 
     const match = await bcrypt.compare(password, user.password);
+    if (user.role === 'cashier' && (!user.branch_id || user.branch_is_active === false)) {
+      return res.status(403).json({
+        message: user.branch_id
+          ? 'Your branch is deactivated. Please contact the owner.'
+          : 'No branch is assigned to this account. Please contact the owner.',
+        code: 'BRANCH_INACTIVE',
+      });
+    }
+
     if (!match) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }

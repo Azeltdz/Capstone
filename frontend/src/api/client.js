@@ -1,5 +1,6 @@
 // src/api/client.js
 export const API_BASE = import.meta.env.VITE_API_BASE;
+const NOTICE_FOR = { SESSION_EXPIRED: "expired", ACCOUNT_INACTIVE: "account", BRANCH_INACTIVE: "branch" };
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -30,9 +31,10 @@ async function request(path, options = {}) {
   });
 
   if (res.status === 401 && token) {
+    const body = await res.json().catch(() => ({}));
     sessionStorage.clear();
-    window.location.href = "/";
-    throw new ApiError("Session expired", 401);
+    window.location.href = `/?notice=${NOTICE_FOR[body.code] ?? "expired"}`;
+    throw new ApiError("Session ended", 401);
   }
 
   if (!res.ok) {

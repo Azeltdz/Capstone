@@ -1,10 +1,17 @@
-const { body, param, validationResult } = require('express-validator');
+const { body, param, validationResult, query } = require('express-validator');
 
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
   next();
 };
+
+const listOrdersRules = [
+  query('date').optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('date must look like 2026-10-02'),
+  query('order_type').optional().isIn(['dine-in', 'take-out', 'delivery']).withMessage('order_type is invalid'),
+  query('search').optional().isString().isLength({ max: 100 }).withMessage('search must be under 100 characters'),
+  validate,
+];
 
 const orderIdRule = [param('id').isInt({ min: 1 }).withMessage('Invalid order'), validate];
 
@@ -25,4 +32,4 @@ const placeOrderRules = [
   validate,
 ];
 
-module.exports = { placeOrderRules, orderIdRule };
+module.exports = { placeOrderRules, orderIdRule, listOrdersRules };

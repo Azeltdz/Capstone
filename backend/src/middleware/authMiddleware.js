@@ -13,32 +13,35 @@ async function loadUser(id) {
   return user;
 }
 
-function invalidateUserCache(id) {
-  cache.delete(Number(id));
-}
+const invalidateUserCache = (id) => cache.delete(Number(id));
+const clearUserCache = () => cache.clear();
+const deny = (res, code, message) => res.status(401).json({ message, code });
 
 async function protect(req, res, next) {
   const header = req.headers.authorization;
   const token = header?.startsWith('Bearer ') ? header.slice(7) : req.cookies?.token;
-  if (!token) return res.status(401).json({ message: 'Not authenticated' });
+  if (!token) return deny(res, 'SESSION_EXPIRED', 'Not authenticated');
 
   let decoded;
   try {
     decoded = jwt.verify(token, config.accessTokenSecret);
   } catch {
-    return res.status(401).json({ message: 'Invalid or expired token' });
+    return deny(res, 'SESSION_EXPIRED', 'Invalid or expired token');
   }
 
   try {
     const user = await loadUser(decoded.user_id);
-    if (!user || !user.is_active) {
-      return res.status(401).json({ message: 'Account inactive or not found' });
+    if (!user || !user.is_active) return deny(res, 'ACCOUNT_INACTIVE', 'Account inactive or not found');
+
+    if (user.role === 'cashier' && (!user.branch_id || user.branch_is_active === false)) {
+      return deny(res, 'BRANCH_INACTIVE', 'Your branch is deactivated');
     }
+
     req.user = { user_id: user.user_id, role: user.role, branch_id: user.branch_id };
     next();
   } catch (err) {
-    next(err); // a database problem is a 500, not a "bad token" that logs everyone out
+    next(err);
   }
 }
 
-module.exports = { protect, invalidateUserCache };
+module.exports = { protect, invalidateUserCache, clearUserCache };

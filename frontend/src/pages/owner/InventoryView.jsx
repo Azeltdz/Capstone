@@ -11,14 +11,18 @@ import {
   useDeleteInventoryItem,
 } from "../../hooks/useInventory";
 import { useSettings } from "../../hooks/useSettings";
+import StockModal from "./inventory/StockModal";
+import MovementsModal from "./inventory/MovementsModal";
+import { UNIT_OPTIONS } from "../../constants/units";
 
 const EMPTY_FORM = { branchId: "", name: "", unit: "", unitCost: "", onHand: "", reorder: "" };
-const UNIT_SUGGESTIONS = ["kg", "g", "L", "ml", "pcs", "pack", "bottle", "can", "sack"];
 
 export default function InventoryView() {
   const [searchInput, setSearchInput] = useState("");
   const [branch, setBranch] = useState("all");
   const [status, setStatus] = useState("all");
+  const [stockTarget, setStockTarget] = useState(null);
+  const [historyItem, setHistoryItem] = useState(null);
 
   const { data: branches = [] } = useBranches();
   const { data: items = [], isLoading, error } = useInventoryList(branch);
@@ -110,14 +114,8 @@ export default function InventoryView() {
           reorder: Number(form.reorder),
         });
       } else {
-        if (form.onHand === "" || Number(form.onHand) < 0) throw new Error("On hand must be 0 or more.");
         if (form.reorder === "" || Number(form.reorder) < 0) throw new Error("Reorder level must be 0 or more.");
-
-        await updateItem.mutateAsync({
-          id: editing.inventory_id,
-          quantity_on_hand: Number(form.onHand),
-          reorder_threshold: Number(form.reorder),
-        });
+        await updateItem.mutateAsync({ id: editing.inventory_id, reorder_threshold: Number(form.reorder) });
       }
       setEditing(null);
     } catch (err) {
@@ -246,6 +244,8 @@ export default function InventoryView() {
                   </td>
                   <td>{format(new Date(item.last_updated), "MMM d, h:mm a")}</td>
                   <td>
+                    <button className="btn btn-green btn-sm" onClick={() => setStockTarget({ item, type: "restock" })}>Stock</button>{" "}
+                    <button className="btn btn-sm" onClick={() => setHistoryItem(item)}>History</button>{" "}
                     <button className="btn btn-orange btn-sm" onClick={() => openEdit(item)}>Edit</button>{" "}
                     <button
                       className="btn btn-red btn-sm"
@@ -269,11 +269,26 @@ export default function InventoryView() {
         </span>
         <button
           className="btn btn-green"
-          onClick={() => toast("Restock logging is coming soon — use Edit for now to update stock.")}
+          onClick={() => setStockTarget({ item: null, type: "restock" })}
         >
           🚚 Log Delivery / Restock
         </button>
       </div>
+
+      {stockTarget && (
+        <StockModal 
+          items={items} 
+          item={stockTarget.item} 
+          initialType={stockTarget.type} 
+          onClose={() => setStockTarget(null)} 
+        />
+      )}
+      {historyItem &&  (
+        <MovementsModal 
+          item={historyItem} 
+          onClose={() => setHistoryItem(null)} 
+        />
+      )}
 
       {/* Add / Edit popup */}
       {editing && (
@@ -319,30 +334,24 @@ export default function InventoryView() {
               Unit
               {editing === "new" ? (
                 <>
-                  <input
+                  <select
                     className="menu-input"
-                    type="text"
-                    list="inventory-units"
-                    placeholder="kg, L, pcs…"
                     value={form.unit}
                     onChange={(e) => {
                       const unit = e.target.value;
                       setForm((f) => ({
                         ...f,
                         unit,
-                        // Only overwrite the reorder level if the owner hasn't typed their own value
                         reorder:
                           f.reorder === "" || f.reorder === defaultReorderFor(f.unit)
                             ? defaultReorderFor(unit)
                             : f.reorder,
                       }));
                     }}
-                  />
-                  <datalist id="inventory-units">
-                    {UNIT_SUGGESTIONS.map((u) => (
-                      <option key={u} value={u} />
-                    ))}
-                  </datalist>
+                  >
+                    <option value="">Choose a unit…</option>
+                    {UNIT_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
                 </>
               ) : (
                 <input className="menu-input" type="text" value={form.unit} disabled />
@@ -373,6 +382,7 @@ export default function InventoryView() {
                   step="any"
                   value={form.onHand}
                   onChange={(e) => setForm({ ...form, onHand: e.target.value })}
+                  disabled={editing !== "new"}
                 />
               </label>
               <label className="menu-field menu-newcat-name">
@@ -390,8 +400,8 @@ export default function InventoryView() {
 
             {editing !== "new" && (
               <p className="modal-muted" style={{ fontSize: "0.85em" }}>
-                Ingredient name, unit, and branch can't be changed here since this ingredient may be shared
-                across recipes and branches.
+                Ingredient, unit, branch and stock can't be changed here. 
+                Use Stock on the row to record deliveries, counts or spoilage.
               </p>
             )}
 

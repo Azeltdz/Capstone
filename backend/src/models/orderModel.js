@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const TZ = "Asia/Manila";
+const { TZ } = require('../utils/dates');
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 const round2 = (n) => Math.round(n * 100) / 100;
 const round3 = (n) => Math.round(n * 1000) / 1000;
@@ -12,7 +12,12 @@ async function createOrderWithItems({
   let destroy = false;
   try {
     await client.query('BEGIN');
-
+    const { rows: branchRows } = await client.query(
+      'SELECT is_active FROM branches WHERE branch_id = $1 FOR SHARE',
+      [branch_id]
+    );
+    if (!branchRows.length) throw httpError(404, 'Branch not found');
+    if (!branchRows[0].is_active) throw httpError(403, "This branch is deactivated and can't take orders.");
     // 1. Menu items, priced here on the server (never trust a price from the browser)
     const requestedIds = [...new Set(items.map((i) => Number(i.item_id)))];
     const { rows: menuItems } = await client.query(
@@ -25,7 +30,6 @@ async function createOrderWithItems({
       throw httpError(400, `Item(s) unavailable: ${unavailable.map((m) => m.item_name).join(', ')}`);
     }
     const menuById = new Map(menuItems.map((m) => [m.item_id, m]));
-
     // 2. Merge repeated lines, then price each one
     const qtyByItem = new Map();
     for (const i of items) {
@@ -38,28 +42,27 @@ async function createOrderWithItems({
       return { item_id, item_name: m.item_name, quantity, unit_price, subtotal: round2(unit_price * quantity) };
     });
     const total_amount = round2(lines.reduce((sum, l) => sum + l.subtotal, 0));
-
     // 3. Stock: one query for every recipe line, one to lock the stock rows, one to deduct
     const { rows: recipe } = await client.query(
       `SELECT item_id, ingredient_id, quantity_per_unit FROM bill_of_materials WHERE item_id = ANY($1::int[])`,
       [requestedIds]
     );
-    const needed = new Map(); // ingredient_id -> total this order uses
+    const needed = new Map();
     for (const r of recipe) {
       needed.set(
         r.ingredient_id,
         (needed.get(r.ingredient_id) ?? 0) + Number(r.quantity_per_unit) * qtyByItem.get(r.item_id)
       );
     }
-
+    let deductions = [];
     if (needed.size) {
       const { rows: stock } = await client.query(
         `SELECT inv.inventory_id, inv.ingredient_id, inv.quantity_on_hand, ing.ingredient_name, ing.unit
-         FROM inventory inv
-         JOIN ingredients ing ON ing.ingredient_id = inv.ingredient_id
-         WHERE inv.branch_id = $1 AND inv.ingredient_id = ANY($2::int[])
-         ORDER BY inv.ingredient_id
-         FOR UPDATE OF inv`,
+          FROM inventory inv
+          JOIN ingredients ing ON ing.ingredient_id = inv.ingredient_id
+          WHERE inv.branch_id = $1 AND inv.ingredient_id = ANY($2::int[])
+          ORDER BY inv.ingredient_id
+          FOR UPDATE OF inv`,
         [branch_id, [...needed.keys()]]
       );
       const stockByIngredient = new Map(stock.map((s) => [s.ingredient_id, s]));
@@ -75,23 +78,25 @@ async function createOrderWithItems({
         }
       }
 
-      await client.query(
-        `UPDATE inventory inv
-         SET quantity_on_hand = inv.quantity_on_hand - d.qty, last_updated = NOW()
-         FROM unnest($1::int[], $2::numeric[]) AS d(inventory_id, qty)
-         WHERE inv.inventory_id = d.inventory_id`,
-        [stock.map((s) => s.inventory_id), stock.map((s) => round3(needed.get(s.ingredient_id)))]
+      deductions = stock.map((s) => ({ inventory_id: s.inventory_id, qty: round3(needed.get(s.ingredient_id)) }));
+      const { rows: left } = await client.query(
+        `UPDATE inventory inv SET quantity_on_hand = inv.quantity_on_hand - d.qty, last_updated = NOW()
+          FROM unnest($1::int[], $2::numeric[]) AS d(inventory_id, qty)
+          WHERE inv.inventory_id = d.inventory_id
+          RETURNING inv.inventory_id, inv.quantity_on_hand`,
+        [deductions.map((d) => d.inventory_id), deductions.map((d) => d.qty)]
       );
+      const leftById = new Map(left.map((r) => [r.inventory_id, Number(r.quantity_on_hand)]));
+      deductions.forEach((d) => { d.after = leftById.get(d.inventory_id); });
     }
-
     // 4. Dine-in: take the table with one atomic update that only succeeds if it's still free
     let table_number = null;
     if (order_type === 'dine-in') {
       if (!table_id) throw httpError(400, 'table_id is required for dine-in orders');
       const { rows: taken } = await client.query(
         `UPDATE tables SET status = 'occupied'
-         WHERE table_id = $1 AND branch_id = $2 AND is_active = true AND status = 'available'
-         RETURNING table_number`,
+          WHERE table_id = $1 AND branch_id = $2 AND is_active = true AND status = 'available'
+          RETURNING table_number`,
         [table_id, branch_id]
       );
       if (taken.length === 0) {
@@ -105,7 +110,6 @@ async function createOrderWithItems({
       }
       table_number = taken[0].table_number;
     }
-
     // 5. Save the sale and its lines
     const {
       rows: [tx],
@@ -132,6 +136,17 @@ async function createOrderWithItems({
       ]
     );
 
+    if (deductions.length) {
+      await client.query(
+        `INSERT INTO inventory_movements
+            (inventory_id, movement_type, quantity_delta, quantity_after, reference_type, reference_id, performed_by)
+          SELECT m.inventory_id, 'sale', -m.qty, m.qty_after, 'transaction', $1, $2
+          FROM unnest($3::int[], $4::numeric[], $5::numeric[]) AS m(inventory_id, qty, qty_after)`,
+        [tx.transaction_id, cashier_id, deductions.map((d) => d.inventory_id),
+          deductions.map((d) => d.qty), deductions.map((d) => d.after)]
+      );
+    }
+
     await client.query('COMMIT');
 
     return { ...tx, total_amount, table_number, items: lines };
@@ -151,24 +166,21 @@ async function createOrderWithItems({
 async function getOrdersFiltered({ branch_id, order_type, date, search }) {
   const conditions = [];
   const values = [];
-  let i = 1;
+  const add = (v) => { values.push(v); return `$${values.length}`; };
 
-  if (branch_id) { conditions.push(`t.branch_id = $${i++}`); values.push(branch_id); }
-  if (order_type) { conditions.push(`t.order_type = $${i++}`); values.push(order_type); }
-
+  if (branch_id) conditions.push(`t.branch_id = ${add(branch_id)}`);
+  if (order_type) conditions.push(`t.order_type = ${add(order_type)}`);
   if (date) {
-    conditions.push(`DATE(t.transaction_at AT TIME ZONE '${TZ}') = $${i++}`);
-    values.push(date);
+    const d = add(date);
+    conditions.push(`t.transaction_at >= (((${d}::date)::timestamp) AT TIME ZONE '${TZ}')`);
+    conditions.push(`t.transaction_at < ((((${d}::date + 1))::timestamp) AT TIME ZONE '${TZ}')`);
   }
-
   if (search && search.trim()) {
-    const escaped = search.trim().replace(/[\\%_]/g, "\\$&");
-    conditions.push(`t.customer_name ILIKE $${i++}`);
-    values.push(`${escaped}%`);
+    const escaped = search.trim().replace(/[\\%_]/g, '\\$&');
+    conditions.push(`t.customer_name ILIKE ${add(`${escaped}%`)}`);
   }
 
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const { rows } = await pool.query(
     `SELECT t.*, u.full_name AS cashier_name, tb.table_number, b.branch_name
       FROM transactions t
@@ -176,7 +188,8 @@ async function getOrdersFiltered({ branch_id, order_type, date, search }) {
       LEFT JOIN tables tb ON tb.table_id = t.table_id
       JOIN branches b ON b.branch_id = t.branch_id
       ${where}
-      ORDER BY t.transaction_at DESC`,
+      ORDER BY t.transaction_at DESC
+      LIMIT 500`,
     values
   );
   return rows;

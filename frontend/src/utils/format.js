@@ -22,3 +22,5 @@ export function initialsOf(name) {
     (name ?? "").trim().split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?"
   );
 }
+
+export const manilaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });

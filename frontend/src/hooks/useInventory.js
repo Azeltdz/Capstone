@@ -1,7 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getInventoryByBranch, getAllInventory, getLowStockByBranch, getLowStockAllBranches,
-  createInventoryEntry, updateInventoryEntry, adjustInventoryEntry, deleteInventoryEntry,
+  createInventoryEntry, updateInventoryEntry, deleteInventoryEntry, recordMovement, getMovements
 } from "../api/inventory";
 import { getIngredients, createIngredient } from "../api/ingredients";
 
@@ -45,6 +45,10 @@ export function useAddInventoryItem() {
         (i) => i.ingredient_name.toLowerCase() === cleanName.toLowerCase()
       );
 
+      if (ingredient && ingredient.unit !== unit) {
+        throw new Error(`${ingredient.ingredient_name} already exists and is counted in ${ingredient.unit}. Use that unit.`);
+      }
+
       if (!ingredient) {
         const res = await createIngredient({
           ingredient_name: cleanName,
@@ -70,17 +74,25 @@ export function useAddInventoryItem() {
 export function useUpdateInventoryItem() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, quantity_on_hand, reorder_threshold }) =>
-      updateInventoryEntry(id, { quantity_on_hand, reorder_threshold }),
+    mutationFn: ({ id, reorder_threshold }) => updateInventoryEntry(id, { reorder_threshold }),
     onSuccess: () => invalidateInventory(queryClient),
   });
 }
 
-export function useAdjustInventoryItem() {
+export function useRecordMovement() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, delta }) => adjustInventoryEntry(id, delta),
+    mutationFn: ({ inventoryId, ...payload }) => recordMovement(inventoryId, payload),
     onSuccess: () => invalidateInventory(queryClient),
+  });
+}
+
+export function useMovements(inventoryId, page) {
+  return useQuery({
+    queryKey: ["inventory", "movements", inventoryId, page],
+    queryFn: () => getMovements(inventoryId, { page, pageSize: 15 }),
+    enabled: !!inventoryId,
+    placeholderData: keepPreviousData,
   });
 }
 

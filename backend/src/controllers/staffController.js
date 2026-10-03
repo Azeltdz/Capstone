@@ -1,6 +1,7 @@
 const { getAllStaff, getStaffByBranch, findUserById, updateUser } = require('../models/userModel');
 const { createStaffAccount } = require('../services/userService');
 const { invalidateUserCache } = require('../middleware/authMiddleware')
+const { getBranchById } = require ('../models/branchModel');
 
 // GET /api/staff  (owner only — ?branchId= optional filter)
 async function listStaff(req, res, next) {
@@ -38,13 +39,26 @@ async function createStaff(req, res, next) {
 async function editStaff(req, res, next) {
   try {
     const { id } = req.params;
-    const staff = await updateUser(id, req.body);
-    if (!staff) return res.status(404).json({ message: 'Staff not found' });
+    const current = await findUserById(id);
+    if (!current) return res.status(404).json({ message: 'Staff not found' });
+
+    const role = req.body.role ?? current.role;
+    const requested = req.body.branch_id !== undefined ? req.body.branch_id : current.branch_id;
+    const branch_id = role === 'owner' ? null : requested;
+
+    if (role === 'cashier') {
+      if (!branch_id) return res.status(400).json({ message: 'A cashier must be assigned to a branch.' });
+      if (Number(branch_id) !== current.branch_id) {
+        const branch = await getBranchById(branch_id);
+        if (!branch) return res.status(400).json({ message: 'Branch not found' });
+        if (!branch.is_active) return res.status(400).json({ message: 'That branch is deactivated. Choose an active branch.' });
+      }
+    }
+
+    const staff = await updateUser(id, { ...req.body, role, branch_id });
     invalidateUserCache(id);
     res.json({ message: 'Staff updated', staff });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 }
 
 // PATCH /api/staff/:id/deactivate  (owner only)
