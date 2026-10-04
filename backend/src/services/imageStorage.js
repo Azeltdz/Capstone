@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const config = require('../config/config');
+const sharp = require('sharp');
 
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 let client;
@@ -29,13 +30,23 @@ function detectImage(buf) {
 }
 
 async function uploadMenuImage(file) {
-  const kind = detectImage(file.buffer);
-  if (!kind) throw httpError(400, 'That file is not a valid JPEG, PNG, or WEBP image.');
+  if (!detectImage(file.buffer)) throw httpError(400, 'That file is not a valid JPEG, PNG, or WEBP image.');
 
-  const objectPath = `menu-items/${crypto.randomUUID()}.${kind.ext}`;
+  let data;
+  try {
+    data = await sharp(file.buffer)
+      .rotate()
+      .resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  } catch {
+    throw httpError(400, "That image couldn't be read. Try a different file.");
+  }
+
+  const objectPath = `menu-items/${crypto.randomUUID()}.webp`; // never use the user's file name
   const bucket = storage();
-  const { error } = await bucket.upload(objectPath, file.buffer, {
-    contentType: kind.type, cacheControl: '31536000', upsert: false,
+  const { error } = await bucket.upload(objectPath, data, {
+    contentType: 'image/webp', cacheControl: '31536000', upsert: false,
   });
   if (error) {
     console.error('Image upload failed:', error.message);

@@ -14,6 +14,7 @@ import { useSettings } from "../../hooks/useSettings";
 import StockModal from "./inventory/StockModal";
 import MovementsModal from "./inventory/MovementsModal";
 import { UNIT_OPTIONS } from "../../constants/units";
+import Pagination from "../../components/Pagination";
 
 const EMPTY_FORM = { branchId: "", name: "", unit: "", unitCost: "", onHand: "", reorder: "" };
 
@@ -49,6 +50,14 @@ export default function InventoryView() {
         (term === "" || i.ingredient_name.toLowerCase().includes(term))
     );
   }, [items, status, searchInput]);
+
+  const [pageSize, setPageSize] = useState(10);
+
+  const filterKey = JSON.stringify({ branch, status, search: searchInput.trim(), pageSize });
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 });
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const page = Math.min(pageState.key === filterKey ? pageState.page : 1, pageCount);
+  const pageRows = filteredItems.slice((page - 1) * pageSize, page * pageSize);
 
   function stockPercent(item) {
     const onHand = Number(item.quantity_on_hand);
@@ -222,7 +231,7 @@ export default function InventoryView() {
             )}
             {!isLoading &&
               !error &&
-              filteredItems.map((item) => (
+              pageRows.map((item) => (
                 <tr key={item.inventory_id}>
                   <td className={item.status === "Low" ? "orange-text" : ""}>{item.ingredient_name}</td>
                   {showBranchCol && <td>{item.branch_name}</td>}
@@ -263,9 +272,18 @@ export default function InventoryView() {
         </table>
       </div>
 
+      <Pagination
+        page={page}
+        pageCount={pageCount}
+        total={filteredItems.length}
+        pageSize={pageSize}
+        onPage={(p) => setPageState({ key: filterKey, page: p })}
+        onPageSize={setPageSize}
+      />
+
       <div className="table-footer">
         <span className="footer-note">
-          {!isLoading ? filteredItems.length : "…"} ingredients shown · Auto-deducted via BOM on each transaction
+          {!isLoading ? filteredItems.length : "…"} ingredients · Auto-deducted via BOM on each transaction
         </span>
         <button
           className="btn btn-green"

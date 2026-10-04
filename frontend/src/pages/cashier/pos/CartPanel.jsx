@@ -1,4 +1,7 @@
+import MenuImage from "../../../components/MenuImage";
+
 const PAYMENT_METHODS = ["Cash", "GCash"];
+
 
 export default function CartPanel({
   orderId, step, orderType, customer, table, cart, onQtyChange,
@@ -63,7 +66,10 @@ export default function CartPanel({
               {lines.map((line) => (
                 <div className="order-line" key={line.id}>
                   <div className="order-line-info">
-                    <span className="order-line-name">{line.name}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <MenuImage variant="thumb" url={line.image_url} category={line.category} />
+                      <span className="order-line-name">{line.name}</span>
+                    </span>
                     <span className="order-line-qty">×{line.qty}</span>
                   </div>
                   <div className="order-line-footer">

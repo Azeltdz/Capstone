@@ -65,6 +65,8 @@ export default function POSView() {
         id,
         name: item.item_name ?? item.name,
         price: item.selling_price !== undefined ? Number(item.selling_price) : item.price,
+        image_url: item.image_url ?? null,
+        category: item.category ?? null,
         qty: newQty,
       };
     }

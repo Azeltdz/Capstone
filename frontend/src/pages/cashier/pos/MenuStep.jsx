@@ -1,6 +1,7 @@
 // src/pages/cashier/pos/MenuStep.jsx
 import { useState } from "react";
 import { useMenuCategories, useMenuItemsByCategory } from "../../../hooks/useMenuItems";
+import MenuImage from "../../../components/MenuImage";
 
 export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
   const [activeCategory, setActiveCategory] = useState(null);
@@ -40,23 +41,54 @@ export default function MenuStep({ stepNumber, cart, onQtyChange, onBack }) {
           items.map((item) => {
             const qty = cart[item.item_id]?.qty || 0;
             return (
-              <div className="item-card" key={item.item_id}>
-                <span className="item-name">{item.item_name}</span>
-                <span className="item-price">₱{Number(item.selling_price).toFixed(2)}</span>
-                <div className="item-stepper">
-                  <button
-                    className="stepper-btn"
-                    disabled={qty === 0}
-                    onClick={() => onQtyChange(item, qty - 1)}
-                  >
-                    -
-                  </button>
-                  <span className="stepper-qty">{qty}</span>
-                  <button className="stepper-btn" onClick={() => onQtyChange(item, qty + 1)}>
-                    +
-                  </button>
+              <article
+                className={`item-card ${qty > 0 ? "is-selected" : ""}`}
+                key={item.item_id}
+              >
+                <div className="item-media">
+                  <MenuImage url={item.image_url} category={item.category} />
+                  {qty > 0 && (
+                    <span className="item-badge" aria-label={`${qty} in order`}>
+                      {qty}
+                    </span>
+                  )}
                 </div>
-              </div>
+
+                <div className="item-body">
+                  <h3 className="item-name">{item.item_name}</h3>
+                  <span className="item-price">
+                    ₱{Number(item.selling_price).toFixed(2)}
+                  </span>
+                </div>
+
+                {qty === 0 ? (
+                  <button
+                    className="add-btn"
+                    onClick={() => onQtyChange(item, 1)}
+                    aria-label={`Add ${item.item_name}`}
+                  >
+                    + Add
+                  </button>
+                ) : (
+                  <div className="item-stepper">
+                    <button
+                      className="stepper-btn"
+                      onClick={() => onQtyChange(item, qty - 1)}
+                      aria-label={`Remove one ${item.item_name}`}
+                    >
+                      -
+                    </button>
+                    <span className="stepper-qty">{qty}</span>
+                    <button
+                      className="stepper-btn stepper-btn--plus"
+                      onClick={() => onQtyChange(item, qty + 1)}
+                      aria-label={`Add one ${item.item_name}`}
+                    >
+                      +
+                    </button>
+                  </div>
+                )}
+              </article>
             );
           })}
         {!itemsLoading && items.length === 0 && <p className="loading-text">No items in this category yet.</p>}
