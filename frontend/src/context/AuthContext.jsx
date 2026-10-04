@@ -2,7 +2,6 @@
 import { createContext, useContext, useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
-import { logoutRequest } from "../api/auth";
 
 const AuthContext = createContext(null);
 
@@ -19,10 +18,11 @@ export function AuthProvider({ children }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState(readStoredUser);
 
-  const login = useCallback(async (user_name, password) => {
+  const login = useCallback(async (user_name, password, portal) => {
     const data = await apiFetch("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ user_name, password }),
+      auth: false,
+      body: JSON.stringify({ user_name, password, portal }),
     });
     sessionStorage.setItem("token", data.token);
     sessionStorage.setItem("user", JSON.stringify(data.user));
@@ -31,7 +31,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
-    logoutRequest().catch(() => {});
     sessionStorage.clear();
     queryClient.clear();
     setUser(null);

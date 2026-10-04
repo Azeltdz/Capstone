@@ -1,7 +1,8 @@
 // src/pages/LoginPage.jsx
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { homeFor } from "../constants/routes";
 import profilePic from "../assets/profile.jpg";
 
 const EYE_OPEN_PATH =
@@ -10,25 +11,46 @@ const EYE_OPEN_PATH =
 const EYE_SLASH_PATH =
   "M2.71 3.27 1.29 4.69l3.17 3.17A10.94 10.94 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.63 0 3.17-.31 4.57-.87l3.14 3.14 1.42-1.42L2.71 3.27zM12 17c-2.76 0-5-2.24-5-5 0-1.1.36-2.12.96-2.94l1.42 1.42A3 3 0 0 0 12 15c.39 0 .77-.08 1.11-.22l1.57 1.57c-.82.41-1.73.65-2.68.65zm2.97-2.97-1.46-1.46A3 3 0 0 0 12 9c-.39 0-.77.08-1.11.22L9.43 7.76A5 5 0 0 1 17 12c0 .75-.17 1.47-.47 2.03L14.97 14.03zM12 6.5c3.2 0 6.08 1.83 7.67 5.5-.44 1.01-1.05 1.9-1.79 2.65l1.42 1.42A12.2 12.2 0 0 0 23 12C21.27 7.61 17 4.5 12 4.5c-1.03 0-2.03.13-2.98.38l1.57 1.57c.46-.03.93-.05 1.41-.05z";
 
+const HEADING = { cashier: "Cashier sign-in", owner: "Owner sign-in" };
+
 const NOTICES = {
   expired: "Your session expired. Please sign in again.",
   account: "Your account was deactivated. Please contact the owner.",
   branch: "Your branch is deactivated. Please contact the owner.",
 };
 
-export default function LoginPage() {
-  const [role, setRole] = useState("owner");
+export default function LoginPage({ portal = "cashier" }) {
+  const { user, login } = useAuth();
+  const [searchParams] = useSearchParams();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [searchParams] = useSearchParams();
   const [error, setError] = useState(() => NOTICES[searchParams.get("notice")] ?? "");
   const [loading, setLoading] = useState(false);
 
-  const { login, logout } = useAuth();
-  const navigate = useNavigate();
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = `${HEADING[portal]} · Filipee's Bistro`;
 
-  async function handleLogin() {
+    let robots;
+    if (portal === "owner") {
+      robots = document.createElement("meta");
+      robots.name = "robots";
+      robots.content = "noindex, nofollow";
+      document.head.appendChild(robots);
+    }
+    return () => {
+      document.title = previousTitle;
+      robots?.remove();
+    };
+  }, [portal]);
+
+  if (user) return <Navigate to={homeFor(user.role)} replace />;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+
     if (!username.trim() || !password) {
       setError("Enter your username and password.");
       return;
@@ -37,37 +59,20 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const user = await login(username.trim(), password);
-
-      if (user.role !== role) {
-        setError(`This account is registered as ${user.role}, not ${role}.`);
-        logout();
-        setLoading(false);
-        return;
-      }
-
-      navigate(user.role === "owner" ? "/owner" : "/cashier");
+      await login(username.trim(), password, portal);
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
     }
   }
 
-  function handleKeyDown(e) {
-    if (e.key === "Enter") handleLogin();
-  }
-
   return (
     <div className="login-page">
-      <div className="login-card">
-        <img
-          className="login-logo"
-          alt="Filipee's Bistro logo"
-          src={profilePic}
-        />
+      <form className="login-card" onSubmit={handleSubmit} noValidate>
+        <img className="login-logo" alt="Filipee's Bistro logo" src={profilePic} />
         <h1 className="login-title">Filipee's Bistro</h1>
         <p className="login-tagline">Masarap na Mura pa, Saan ka pa!</p>
+        <p className="login-tagline" style={{ fontWeight: 600 }}>{HEADING[portal]}</p>
 
         <div className="login-field">
           <label htmlFor="username">Username</label>
@@ -76,9 +81,9 @@ export default function LoginPage() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            onKeyDown={handleKeyDown}
             placeholder="Enter your username"
             autoComplete="username"
+            autoFocus
           />
         </div>
 
@@ -94,7 +99,6 @@ export default function LoginPage() {
                 setPassword(value);
                 if (!value) setShowPassword(false);
               }}
-              onKeyDown={handleKeyDown}
               placeholder="Enter your password"
               autoComplete="current-password"
             />
@@ -119,31 +123,10 @@ export default function LoginPage() {
           </p>
         )}
 
-        <button type="button" className="primary-btn" onClick={handleLogin} disabled={loading}>
+        <button type="submit" className="primary-btn" disabled={loading}>
           {loading ? "Signing in…" : "Log In"}
         </button>
-
-        <div className="role-row" role="radiogroup" aria-label="Login as">
-          <button
-            type="button"
-            className={`role-btn ${role === "owner" ? "active" : ""}`}
-            role="radio"
-            aria-checked={role === "owner"}
-            onClick={() => setRole("owner")}
-          >
-            Owner
-          </button>
-          <button
-            type="button"
-            className={`role-btn ${role === "cashier" ? "active" : ""}`}
-            role="radio"
-            aria-checked={role === "cashier"}
-            onClick={() => setRole("cashier")}
-          >
-            Cashier
-          </button>
-        </div>
-      </div>
+      </form>
     </div>
   );
 }

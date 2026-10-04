@@ -1,6 +1,7 @@
 // src/api/client.js
-export const API_BASE = import.meta.env.VITE_API_BASE;
-const NOTICE_FOR = { SESSION_EXPIRED: "expired", ACCOUNT_INACTIVE: "account", BRANCH_INACTIVE: "branch" };
+import { CASHIER_LOGIN_PATH, OWNER_LOGIN_PATH } from "../constants/routes";
+
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -18,22 +19,32 @@ export function toQuery(params = {}) {
   return s ? `?${s}` : "";
 }
 
+const NOTICE_FOR = { SESSION_EXPIRED: "expired", ACCOUNT_INACTIVE: "account", BRANCH_INACTIVE: "branch" };
+
 async function request(path, options = {}) {
-  const token = sessionStorage.getItem("token");
+  const { auth = true, ...fetchOptions } = options; // auth: false = don't send or react to a session token
+  const token = auth ? sessionStorage.getItem("token") : null;
 
   const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers: {
-      ...(typeof options.body === "string" ? { "Content-Type": "application/json" } : {}),
+      ...(typeof fetchOptions.body === "string" ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
+      ...fetchOptions.headers,
     },
   });
 
   if (res.status === 401 && token) {
     const body = await res.json().catch(() => ({}));
+    let role = null;
+    try {
+      role = JSON.parse(sessionStorage.getItem("user"))?.role;
+    } catch {
+      /* ignore */
+    }
     sessionStorage.clear();
-    window.location.href = `/?notice=${NOTICE_FOR[body.code] ?? "expired"}`;
+    const loginPath = role === "owner" ? OWNER_LOGIN_PATH : CASHIER_LOGIN_PATH;
+    window.location.href = `${loginPath}?notice=${NOTICE_FOR[body.code] ?? "expired"}`;
     throw new ApiError("Session ended", 401);
   }
 

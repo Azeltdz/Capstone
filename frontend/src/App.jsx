@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { CASHIER_LOGIN_PATH, OWNER_LOGIN_PATH } from "./constants/routes";
 
 import LoginPage from "./pages/LoginPage";
 
@@ -26,7 +27,8 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<LoginPage />} />
+          <Route path={CASHIER_LOGIN_PATH} element={<LoginPage key="cashier" portal="cashier" />} />
+          <Route path={OWNER_LOGIN_PATH} element={<LoginPage key="owner" portal="owner" />} />
 
           <Route
             path="/cashier"

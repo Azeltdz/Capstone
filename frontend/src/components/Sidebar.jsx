@@ -1,14 +1,8 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Sidebar({ sections }) {
   const { logout } = useAuth();
-  const navigate = useNavigate();
-
-  function handleLogout() {
-    logout();
-    navigate("/", { replace: true });
-  }
 
   return (
     <nav className="sidebar" aria-label="Main navigation">
@@ -37,7 +31,7 @@ export default function Sidebar({ sections }) {
         </div>
       ))}
 
-      <button type="button" className="nav-item logout-item" onClick={handleLogout}>
+      <button type="button" className="nav-item logout-item" onClick={() => logout()}>
         <i className="icon" aria-hidden="true">🚪</i> Log Out
       </button>
     </nav>

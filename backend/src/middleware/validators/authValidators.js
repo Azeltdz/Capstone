@@ -17,9 +17,10 @@ const registerRules = [
 ];
 
 const loginRules = [
-  body('user_name').notEmpty(),
-  body('password').notEmpty(),
-  validate
+  body('user_name').isString().trim().notEmpty().withMessage('Enter your username'),
+  body('password').isString().notEmpty().withMessage('Enter your password'),
+  body('portal').isIn(['cashier', 'owner']).withMessage('Invalid sign-in page'),
+  validate,
 ];
 
 module.exports = { registerRules, loginRules };
