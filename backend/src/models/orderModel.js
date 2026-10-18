@@ -1,13 +1,16 @@
 const pool = require('../config/db');
 const { TZ } = require('../utils/dates');
+const { calcOrderTotals } = require('../utils/pricing');
 const httpError = (statusCode, message) => Object.assign(new Error(message), { statusCode });
 const round2 = (n) => Math.round(n * 100) / 100;
 const round3 = (n) => Math.round(n * 1000) / 1000;
 const isConnectionError = (err) => /Connection terminated|ECONNRESET|ETIMEDOUT|timeout/i.test(err?.message ?? '');
 
 async function createOrderWithItems({
-  branch_id, cashier_id, table_id, order_type, payment_method, customer_name, guest_count, items,
+  branch_id, cashier_id, table_id, order_type, payment_method, payment_status = 'paid',
+  customer_name, guest_count, items, pwd,
 }) {
+  const isPaid = payment_status === 'paid';
   const client = await pool.connect();
   let destroy = false;
   try {
@@ -30,18 +33,41 @@ async function createOrderWithItems({
       throw httpError(400, `Item(s) unavailable: ${unavailable.map((m) => m.item_name).join(', ')}`);
     }
     const menuById = new Map(menuItems.map((m) => [m.item_id, m]));
-    // 2. Merge repeated lines, then price each one
-    const qtyByItem = new Map();
+    // 2. Merge repeated lines (keeping notes and the PWD flag), then price each one
+    const merged = new Map();
     for (const i of items) {
       const id = Number(i.item_id);
-      qtyByItem.set(id, (qtyByItem.get(id) ?? 0) + Number(i.quantity));
+      const note = typeof i.note === 'string' ? i.note.trim() : '';
+      const prev = merged.get(id);
+      if (!prev) {
+        merged.set(id, { quantity: Number(i.quantity), notes: note ? [note] : [], pwd: i.pwd === true });
+      } else {
+        prev.quantity += Number(i.quantity);
+        if (note && !prev.notes.includes(note)) prev.notes.push(note);
+        prev.pwd = prev.pwd && i.pwd === true; // only PWD if every merged line was ticked
+      }
     }
-    const lines = [...qtyByItem].map(([item_id, quantity]) => {
-      const m = menuById.get(item_id);
-      const unit_price = Number(m.selling_price);
-      return { item_id, item_name: m.item_name, quantity, unit_price, subtotal: round2(unit_price * quantity) };
+    const qtyByItem = new Map([...merged].map(([id, m]) => [id, m.quantity]));
+    const lines = [...merged].map(([item_id, m]) => {
+      const mi = menuById.get(item_id);
+      const unit_price = Number(mi.selling_price);
+      return {
+        item_id,
+        item_name: mi.item_name,
+        quantity: m.quantity,
+        unit_price,
+        subtotal: round2(unit_price * m.quantity),
+        note: m.notes.length ? m.notes.join('; ').slice(0, 120) : null,
+        pwd_applied: m.pwd,
+      };
     });
-    const total_amount = round2(lines.reduce((sum, l) => sum + l.subtotal, 0));
+    const hasPwd = lines.some((l) => l.pwd_applied);
+    if (hasPwd && !(pwd?.name?.trim() && pwd?.id_number?.trim())) {
+      throw httpError(400, 'PWD name and ID number are required');
+    }
+    // Prices include 12% VAT. PWD lines are VAT-exempt and get 20% off the VAT-exclusive price.
+    const totals = calcOrderTotals(lines.map((l) => ({ price: l.unit_price, qty: l.quantity, pwd: l.pwd_applied })));
+    const total_amount = totals.total;
     // 3. Stock: one query for every recipe line, one to lock the stock rows, one to deduct
     const { rows: recipe } = await client.query(
       `SELECT item_id, ingredient_id, quantity_per_unit FROM bill_of_materials WHERE item_id = ANY($1::int[])`,
@@ -110,29 +136,37 @@ async function createOrderWithItems({
       }
       table_number = taken[0].table_number;
     }
-    // 5. Save the sale and its lines
+    // 5. Save the sale and its lines.
+    //    transactions.status is the payment status: 'paid' or 'unpaid'. order_status starts as 'pending'.
     const {
       rows: [tx],
     } = await client.query(
       `INSERT INTO transactions
-          (branch_id, cashier_id, table_id, order_type, status, total_amount, payment_method,
-          customer_name, guest_count, transaction_at)
-        VALUES ($1, $2, $3, $4, 'paid', $5, $6, $7, $8, NOW())
+          (branch_id, cashier_id, table_id, order_type, status, order_status, total_amount, payment_method,
+            customer_name, guest_count, subtotal_amount, vatable_sales, vat_amount, vat_exempt_sales,
+            pwd_discount, pwd_name, pwd_id_number, paid_at, transaction_at)
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
        RETURNING *`,
       [
         branch_id, cashier_id, order_type === 'dine-in' ? table_id : null, order_type,
-        total_amount, payment_method, customer_name || null, guest_count || null,
+        isPaid ? 'paid' : 'unpaid', total_amount, isPaid ? payment_method : null,
+        customer_name || null, guest_count || null,
+        totals.subtotal, totals.vatableSales, totals.vatAmount, totals.vatExemptSales,
+        totals.pwdDiscount, hasPwd ? pwd.name.trim() : null, hasPwd ? pwd.id_number.trim() : null,
+        isPaid ? new Date() : null,
       ]
     );
 
     await client.query(
-      `INSERT INTO transaction_items (transaction_id, item_id, quantity, unit_price, subtotal)
-          SELECT $1, d.item_id, d.quantity, d.unit_price, d.subtotal
-          FROM unnest($2::int[], $3::int[], $4::numeric[], $5::numeric[]) AS d(item_id, quantity, unit_price, subtotal)`,
+      `INSERT INTO transaction_items (transaction_id, item_id, quantity, unit_price, subtotal, note, pwd_applied)
+          SELECT $1, d.item_id, d.quantity, d.unit_price, d.subtotal, d.note, d.pwd_applied
+          FROM unnest($2::int[], $3::int[], $4::numeric[], $5::numeric[], $6::text[], $7::boolean[])
+              AS d(item_id, quantity, unit_price, subtotal, note, pwd_applied)`,
       [
         tx.transaction_id,
         lines.map((l) => l.item_id), lines.map((l) => l.quantity),
         lines.map((l) => l.unit_price), lines.map((l) => l.subtotal),
+        lines.map((l) => l.note), lines.map((l) => l.pwd_applied),
       ]
     );
 
@@ -149,7 +183,18 @@ async function createOrderWithItems({
 
     await client.query('COMMIT');
 
-    return { ...tx, total_amount, table_number, items: lines };
+    return {
+      ...tx,
+      total_amount,
+      table_number,
+      items: lines,
+      payment_status: tx.status,
+      subtotal_amount: totals.subtotal,
+      vatable_sales: totals.vatableSales,
+      vat_amount: totals.vatAmount,
+      vat_exempt_sales: totals.vatExemptSales,
+      pwd_discount: totals.pwdDiscount,
+    };
   } catch (err) {
     destroy = isConnectionError(err);
     try {
@@ -163,13 +208,14 @@ async function createOrderWithItems({
   }
 }
 
-async function getOrdersFiltered({ branch_id, order_type, date, search }) {
+async function getOrdersFiltered({ branch_id, order_type, payment_status, date, search }) {
   const conditions = [];
   const values = [];
   const add = (v) => { values.push(v); return `$${values.length}`; };
 
   if (branch_id) conditions.push(`t.branch_id = ${add(branch_id)}`);
   if (order_type) conditions.push(`t.order_type = ${add(order_type)}`);
+  if (payment_status) conditions.push(`t.status = ${add(payment_status)}`);
   if (date) {
     const d = add(date);
     conditions.push(`t.transaction_at >= (((${d}::date)::timestamp) AT TIME ZONE '${TZ}')`);
@@ -182,7 +228,7 @@ async function getOrdersFiltered({ branch_id, order_type, date, search }) {
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const { rows } = await pool.query(
-    `SELECT t.*, u.full_name AS cashier_name, tb.table_number, b.branch_name
+    `SELECT t.*, t.status AS payment_status, u.full_name AS cashier_name, tb.table_number, b.branch_name
       FROM transactions t
       JOIN users u ON u.user_id = t.cashier_id
       LEFT JOIN tables tb ON tb.table_id = t.table_id
@@ -197,12 +243,13 @@ async function getOrdersFiltered({ branch_id, order_type, date, search }) {
 
 async function getOrderById(id) {
   const { rows } = await pool.query(
-    `SELECT t.*, u.full_name AS cashier_name, tb.table_number, b.branch_name,
+    `SELECT t.*, t.status AS payment_status, u.full_name AS cashier_name, tb.table_number, b.branch_name,
             rs.business_name AS receipt_business_name, rs.footer_message AS receipt_footer_message,
             COALESCE((
               SELECT json_agg(json_build_object(
                         'tx_item_id', ti.tx_item_id, 'item_id', ti.item_id, 'item_name', mi.item_name,
-                        'quantity', ti.quantity, 'unit_price', ti.unit_price, 'subtotal', ti.subtotal
+                        'quantity', ti.quantity, 'unit_price', ti.unit_price, 'subtotal', ti.subtotal,
+                        'note', ti.note, 'pwd_applied', ti.pwd_applied
                       ) ORDER BY ti.tx_item_id)
               FROM transaction_items ti
               JOIN menu_items mi ON mi.item_id = ti.item_id
@@ -219,4 +266,35 @@ async function getOrderById(id) {
   return rows[0] ?? null;
 }
 
-module.exports = { createOrderWithItems, getOrdersFiltered, getOrderById };
+async function settleOrder({ id, payment_method, branch_id = null }) {
+  const { rows } = await pool.query(
+    `UPDATE transactions
+        SET status = 'paid', payment_method = $2, paid_at = NOW()
+      WHERE transaction_id = $1 AND status = 'unpaid'
+        AND ($3::int IS NULL OR branch_id = $3)
+      RETURNING transaction_id`,
+    [id, payment_method, branch_id]
+  );
+  if (rows.length) return getOrderById(id);
+
+  const { rows: found } = await pool.query(
+    'SELECT branch_id, status FROM transactions WHERE transaction_id = $1',
+    [id]
+  );
+  if (!found.length || (branch_id && found[0].branch_id !== branch_id)) throw httpError(404, 'Order not found');
+  throw httpError(409, found[0].status === 'paid' ? 'Order is already paid' : 'This order cannot be paid');
+}
+
+async function completeOrder({ id, branch_id = null }) {
+  await pool.query(
+    `UPDATE transactions SET order_status = 'completed'
+      WHERE transaction_id = $1 AND order_status = 'pending'
+        AND ($2::int IS NULL OR branch_id = $2)`,
+    [id, branch_id]
+  );
+  const order = await getOrderById(id);
+  if (!order || (branch_id && order.branch_id !== branch_id)) throw httpError(404, 'Order not found');
+  return order;
+}
+
+module.exports = { createOrderWithItems, getOrdersFiltered, getOrderById, settleOrder, completeOrder };

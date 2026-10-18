@@ -20,3 +20,17 @@ export function getOrderById(id) {
 }
 
 export const getReceipt = (id) => apiFetch(`/api/orders/${id}/receipt`);
+
+export function settleOrder(orderId, body) {
+  return apiFetch(`/api/orders/${orderId}/payment`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateOrderStatus(orderId, body) {
+  return apiFetch(`/api/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}

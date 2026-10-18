@@ -52,12 +52,6 @@ function trendMessage({ trend, percent_change }) {
   }
 }
 
-// One branch. itemAverages: Map(item_id -> avg servings/day)
-// bomRows: [{ item_id, ingredient_id, quantity_per_unit }]
-// stockByIngredient: Map(ingredient_id -> { ingredient_name, unit, quantity_on_hand })
-//
-//   daily demand   = sum over every dish using the ingredient of (avg servings/day x qty per serving)
-//   reorder qty    = daily demand x (lead time + safety stock days) - stock on hand
 function computeBranchProcurement({ itemAverages, bomRows, stockByIngredient, leadTimeDays, safetyStockDays }) {
   const horizon = leadTimeDays + safetyStockDays;
   const demand = new Map();

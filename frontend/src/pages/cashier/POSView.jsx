@@ -1,161 +1,220 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
-import OrderTypeStep from "./pos/OrderTypeStep";
-import DineInDetailsModal from "./pos/DineInDetailsModal";
 import TableStep from "./pos/TableStep";
+import GuestsModal from "./pos/GuestsModal";
 import MenuStep from "./pos/MenuStep";
 import CartPanel from "./pos/CartPanel";
 import OrderPlacedModal from "./pos/OrderPlacedModal";
 import { usePlaceOrder } from "../../hooks/useOrders";
 
 const PENDING_ORDER_LABEL = "New Order";
-const ORDER_TYPE_MAP = { "Dine-in": "dine-in", "Take-out": "take-out", "Delivery": "delivery" };
+const EMPTY_PWD = { enabled: false, name: "", idNumber: "" };
 
 export default function POSView() {
-  const [step, setStep] = useState("type");
-  const [orderType, setOrderType] = useState(null);
-  const [customer, setCustomer] = useState(null);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [table, setTable] = useState(null); // { table_id, table_number }
+  const [step, setStep] = useState("table"); // "table" | "menu"
+  const [orderType, setOrderType] = useState("dine-in");
+  const [table, setTable] = useState(null); // { table_id, table_number, guest_capacity }
+  const [guests, setGuests] = useState(null);
+  const [pendingTable, setPendingTable] = useState(null); // table waiting for a guest count
+  const [customerName, setCustomerName] = useState("");
   const [cart, setCart] = useState({});
-  const [paymentMethod, setPaymentMethod] = useState(null);
+  const [pwd, setPwd] = useState(EMPTY_PWD);
+  const [payNow, setPayNow] = useState(true);
+  const [paymentMethod, setPaymentMethod] = useState(null); // "cash" | "gcash"
   const [placedOrder, setPlacedOrder] = useState(null);
 
   const { mutate: submitOrder, isPending: isPlacingOrder } = usePlaceOrder();
 
   function resetOrder() {
-    setStep("type");
-    setOrderType(null);
-    setCustomer(null);
-    setShowDetailsModal(false);
+    setStep("table");
+    setOrderType("dine-in");
     setTable(null);
+    setGuests(null);
+    setPendingTable(null);
+    setCustomerName("");
     setCart({});
+    setPwd(EMPTY_PWD);
+    setPayNow(true);
     setPaymentMethod(null);
     setPlacedOrder(null);
   }
 
-  function handleOrderTypeSelect(type) {
-    if (type === "Dine-in") {
-      setShowDetailsModal(true);
+  /* ---------- step 1: table / no table ---------- */
+  function handleTablePick(tableInfo) {
+    setPendingTable(tableInfo);
+  }
+
+  function handleGuestsSubmit(count) {
+    setTable(pendingTable);
+    setGuests(count);
+    setOrderType("dine-in");
+    setPendingTable(null);
+    setStep("menu");
+  }
+
+  function handleSkipTable() {
+    setOrderType("take-out");
+    setTable(null);
+    setGuests(null);
+    setStep("menu");
+  }
+
+  /* ---------- order type (cart panel) ---------- */
+  function handleOrderTypeChange(type) {
+    setOrderType(type);
+    if (type === "dine-in") {
+      if (!table) setStep("table");
     } else {
-      setOrderType(type);
+      setTable(null);
+      setGuests(null);
       setStep("menu");
     }
   }
 
-  function handleDetailsSubmit(details) {
-    setCustomer(details);
-    setOrderType("Dine-in");
-    setShowDetailsModal(false);
-    setStep("table");
-  }
-
-  function handleTableSelect(tableInfo) {
-    setTable(tableInfo);
-    setStep("menu");
-  }
-
+  /* ---------- cart ---------- */
   function handleQtyChange(item, newQty) {
     const id = item.item_id ?? item.id;
-    const next = { ...cart };
-    if (newQty <= 0) {
-      delete next[id];
-    } else {
+    setCart((prev) => {
+      const next = { ...prev };
+      if (newQty <= 0) {
+        delete next[id];
+        return next;
+      }
+      const existing = prev[id];
       next[id] = {
+        ...existing, // keeps the line's note and PWD flag when quantity changes
         id,
         name: item.item_name ?? item.name,
         price: item.selling_price !== undefined ? Number(item.selling_price) : item.price,
         image_url: item.image_url ?? null,
         category: item.category ?? null,
         qty: newQty,
+        note: existing?.note ?? "",
       };
-    }
-    setCart(next);
-
-    if (Object.keys(next).length === 0) {
-      setPaymentMethod(null);
-    }
+      return next;
+    });
   }
 
+  function handleNoteChange(id, note) {
+    setCart((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], note } } : prev));
+  }
+
+  function handleTogglePwdLine(id) {
+    setCart((prev) =>
+      prev[id] ? { ...prev, [id]: { ...prev[id], pwd: prev[id].pwd === false } } : prev
+    );
+  }
+
+  function handlePwdChange(patch) {
+    setPwd((prev) => ({ ...prev, ...patch }));
+  }
+
+  /* ---------- validation ---------- */
+  const lines = Object.values(cart);
+  const nameRequired = orderType === "dine-in" || !payNow;
+
+  const blockers = [];
+  if (orderType === "dine-in" && !table) blockers.push("Select a table");
+  if (lines.length === 0) blockers.push("Add at least one item");
+  if (nameRequired && !customerName.trim()) blockers.push("Enter the customer's name");
+  if (pwd.enabled && lines.length > 0 && lines.every((l) => l.pwd === false)) {
+    blockers.push("Tick at least one PWD item");
+  }
+  if (pwd.enabled && (!pwd.name.trim() || !pwd.idNumber.trim())) {
+    blockers.push("Enter the PWD's name and ID number");
+  }
+  if (payNow && !paymentMethod) blockers.push("Choose Cash or GCash");
+
+  /* ---------- submit ---------- */
   function handlePlaceOrder() {
-    const items = Object.values(cart).map((line) => ({
+    if (blockers.length > 0) return;
+
+    const items = lines.map((line) => ({
       item_id: line.id,
       quantity: line.qty,
+      ...(line.note?.trim() ? { note: line.note.trim() } : {}),
+      ...(pwd.enabled ? { pwd: line.pwd !== false } : {}),
     }));
 
     const payload = {
-      order_type: ORDER_TYPE_MAP[orderType],
-      payment_method: paymentMethod.toLowerCase(),
+      order_type: orderType,
+      payment_status: payNow ? "paid" : "unpaid",
+      ...(payNow ? { payment_method: paymentMethod } : {}),
+      customer_name: customerName.trim() || undefined,
       items,
-      ...(orderType === "Dine-in"
-        ? {
-            table_id: table.table_id,
-            customer_name: customer?.name?.trim() || undefined,
-            guest_count: customer?.guests ? Number(customer.guests) : undefined,
-          }
-        : {}),
-    }
+      ...(orderType === "dine-in" ? { table_id: table.table_id, guest_count: Number(guests) } : {}),
+      ...(pwd.enabled ? { pwd: { name: pwd.name.trim(), id_number: pwd.idNumber.trim() } } : {}),
+    };
 
     submitOrder(payload, {
       onSuccess: (data) => {
         setPlacedOrder(data.order);
       },
-    onError: (err) => {
-      toast.error(
-        err.status >= 500 || err.status === undefined
-          ? "Couldn't confirm the order. Check the Orders page before trying again, in case it was saved."
-          : err.message
-      );
-    },
+      onError: (err) => {
+        toast.error(
+          err.status >= 500 || err.status === undefined
+            ? "Couldn't confirm the order. Check the Orders page before trying again, in case it was saved."
+            : err.message
+        );
+      },
     });
   }
 
   function handleCancelOrder() {
-    if (Object.keys(cart).length > 0 && !window.confirm("Discard this order and start over?")) return;
+    if (lines.length > 0 && !window.confirm("Discard this order and start over?")) return;
     resetOrder();
   }
 
-  function backFromMenu() {
-    if (orderType === "Dine-in") {
-      setStep("table");
-      setTable(null);
-      setCart({});
-      setPaymentMethod(null);
-    } else {
-      resetOrder();
-    }
-  }
-
-  const menuStepNumber = orderType === "Dine-in" ? 3 : 2;
-
   return (
     <div className="pos-layout">
-      {step === "type" && <OrderTypeStep onSelect={handleOrderTypeSelect} />}
-      {step === "table" && <TableStep onSelect={handleTableSelect} onBack={resetOrder} guests={customer?.guests} />}
+      {step === "table" && (
+        <TableStep
+          selectedId={table?.table_id}
+          onSelect={handleTablePick}
+          onSkip={handleSkipTable}
+          onBack={lines.length > 0 ? () => setStep("menu") : undefined}
+        />
+      )}
       {step === "menu" && (
-        <MenuStep stepNumber={menuStepNumber} cart={cart} onQtyChange={handleQtyChange} onBack={backFromMenu} />
+        <MenuStep stepNumber={2} cart={cart} onQtyChange={handleQtyChange} onBack={() => setStep("table")} />
       )}
 
       <CartPanel
-        orderId={PENDING_ORDER_LABEL}
-        step={step}
+        orderLabel={PENDING_ORDER_LABEL}
         orderType={orderType}
-        customer={customer}
+        onOrderTypeChange={handleOrderTypeChange}
         table={table}
+        guests={guests}
+        onChangeTable={() => setStep("table")}
+        customerName={customerName}
+        nameRequired={nameRequired}
+        onCustomerNameChange={setCustomerName}
         cart={cart}
         onQtyChange={handleQtyChange}
+        onNoteChange={handleNoteChange}
+        onTogglePwdLine={handleTogglePwdLine}
+        pwd={pwd}
+        onPwdChange={handlePwdChange}
+        payNow={payNow}
+        onPayNowChange={setPayNow}
         paymentMethod={paymentMethod}
         onSelectPayment={setPaymentMethod}
+        blockers={blockers}
         onPlaceOrder={handlePlaceOrder}
         onCancel={handleCancelOrder}
         isPlacing={isPlacingOrder}
       />
 
-      {placedOrder && <OrderPlacedModal order={placedOrder} onClose={resetOrder} />}
-
-      {showDetailsModal && (
-        <DineInDetailsModal onSubmit={handleDetailsSubmit} onClose={() => setShowDetailsModal(false)} />
+      {pendingTable && (
+        <GuestsModal
+          table={pendingTable}
+          initial={guests ?? 1}
+          onSubmit={handleGuestsSubmit}
+          onClose={() => setPendingTable(null)}
+        />
       )}
+
+      {placedOrder && <OrderPlacedModal order={placedOrder} onClose={resetOrder} />}
     </div>
   );
 }

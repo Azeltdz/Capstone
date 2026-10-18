@@ -1,7 +1,7 @@
 // src/pages/owner/FoodCostingView.jsx
 import { useState } from "react";
 import StatCard from "../../components/StatCard";
-import { useFoodCosting } from "../../hooks/useFoodcosting";
+import { useFoodCosting } from "../../hooks/useFoodCosting";
 import { TARGET_FOOD_COST_PCT } from "../../constants/costing";
 import CostingPanel from "./costing/CostingPanel";
 import RecipeModal from "./costing/RecipeModal";

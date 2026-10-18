@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import toast from "react-hot-toast";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { useTables, useReleaseTable } from "../../hooks/useTables";
-import { useModal } from "../../hooks/useModal";
-import { formatOrderNumber } from "../../utils/format";
+import { useTables } from "../../hooks/useTables";
+import TableTile from "../../components/TableTile";
+import TableLegend from "../../components/TableLegend";
+import TableOrderModal from "./tables/TableOrderModal";
+import { getTableTone } from "../../utils/orderStatus";
 
 function useNow(intervalMs) {
   const [now, setNow] = useState(() => Date.now());
@@ -14,70 +15,53 @@ function useNow(intervalMs) {
   return now;
 }
 
-function elapsedLabel(since, now) {
-  const mins = Math.max(0, Math.floor((now - new Date(since).getTime()) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min`;
-  return `${Math.floor(mins / 60)} h ${mins % 60} min`;
-}
-
-function ConfirmRelease({ table, busy, error, onCancel, onConfirm }) {
-  useModal(() => {
-    if (!busy) onCancel();
-  });
-
-  return (
-    <div className="modal-backdrop" onClick={() => !busy && onCancel()}>
-      <div className="modal-card modal-confirm" role="dialog" aria-modal="true"
-            aria-label={`Clear table ${table.table_number}`} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3 className="modal-title">Clear Table {table.table_number}?</h3>
-          <button type="button" className="modal-close" onClick={onCancel} disabled={busy} aria-label="Close">✕</button>
-        </div>
-        <p className="modal-subtitle">
-          Only clear it once the guests have left. It becomes available for the next party right away.
-        </p>
-        {error && <p className="error-text" role="alert">{error}</p>}
-        <div className="confirm-actions">
-          <button type="button" className="btn-outline" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className="btn-solid" onClick={onConfirm} disabled={busy} autoFocus>
-            {busy ? "Clearing…" : "Clear table"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "unpaid", label: "Unpaid" },
+  { key: "paid", label: "Paid" },
+  { key: "available", label: "Available" },
+];
 
 export default function TablesView() {
   const { user } = useAuth();
   const { data: tables = [], isLoading, error, refetch } = useTables(user?.branch_id);
-  const release = useReleaseTable();
   const now = useNow(30000);
-  const [target, setTarget] = useState(null);
-  const [releaseError, setReleaseError] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
 
-  const occupied = tables.filter((t) => t.status === "occupied").length;
+  const counts = useMemo(() => {
+    const c = { all: tables.length, unpaid: 0, paid: 0, available: 0 };
+    for (const t of tables) c[getTableTone(t)] += 1;
+    return c;
+  }, [tables]);
 
-  async function confirmRelease() {
-    setReleaseError("");
-    try {
-      await release.mutateAsync(target.table_id);
-      toast.success(`Table ${target.table_number} is now available`);
-      setTarget(null);
-    } catch (err) {
-      setReleaseError(err.message);
-    }
-  }
+  const visible = filter === "all" ? tables : tables.filter((t) => getTableTone(t) === filter);
+
+  // Read the open table from live data so the modal updates after payment / status changes.
+  const selected = tables.find((t) => t.table_id === selectedId);
+  const showModal = selected && getTableTone(selected) !== "available";
 
   return (
     <div className="pos-main">
       <h2 className="step-label">Tables</h2>
       <p className="step-sub">
         {tables.length > 0
-          ? `${occupied} occupied · ${tables.length - occupied} available. Clear a table once its guests have left.`
-          : "See which tables are in use and free them when guests leave."}
+          ? `${counts.unpaid} unpaid · ${counts.paid} paid · ${counts.available} available. Tap an occupied table to settle payment, mark it completed, or clear it.`
+          : "See which tables are in use, who still has to pay, and free tables when guests leave."}
       </p>
+
+      <div className="filter-row" role="group" aria-label="Filter tables">
+        {FILTERS.map(({ key, label }) => (
+          <button
+            key={key} type="button" className="filter-chip"
+            aria-pressed={filter === key} onClick={() => setFilter(key)}
+          >
+            {label} <span className="filter-chip-count">{counts[key]}</span>
+          </button>
+        ))}
+      </div>
+
+      <TableLegend />
 
       {isLoading && <p className="loading-text">Loading tables…</p>}
       {error && !tables.length && (
@@ -89,44 +73,26 @@ export default function TablesView() {
       {!isLoading && !error && tables.length === 0 && (
         <p className="loading-text">No tables are set up for this branch yet. Ask the owner to add them in Branch Management.</p>
       )}
+      {tables.length > 0 && visible.length === 0 && (
+        <p className="loading-text">No {filter} tables right now.</p>
+      )}
 
-      <div className="table-grid">
-        {tables.map((t) => {
-          const isOccupied = t.status === "occupied";
+      <div className="floor-grid">
+        {visible.map((t) => {
+          const occupied = getTableTone(t) !== "available";
           return (
-            <div key={t.table_id} className={`table-card ${isOccupied ? "table-occupied" : "table-available"}`}>
-              <span className="table-icon">🍽️</span>
-              <span className="table-name">Table {t.table_number}</span>
-              <span className="table-seats">
-                {isOccupied && t.seated_guests ? `${t.seated_guests} of ${t.guest_capacity} seats` : `${t.guest_capacity} seats`}
-              </span>
-              <span className={`badge ${isOccupied ? "badge-flag" : "badge-good"}`}>
-                {isOccupied ? "Occupied" : "Available"}
-              </span>
-              {isOccupied && (
-                <>
-                  {t.seated_transaction_id && (
-                    <span className="table-seats">
-                      {t.seated_customer || formatOrderNumber(t.seated_transaction_id)}
-                    </span>
-                  )}
-                  {t.seated_at && <span className="table-seats">Seated {elapsedLabel(t.seated_at, now)}</span>}
-                  <button type="button" className="btn-outline btn-sm"
-                          onClick={() => { setReleaseError(""); setTarget(t); }}>
-                    Clear table
-                  </button>
-                </>
-              )}
-            </div>
+            <TableTile
+              key={t.table_id}
+              table={t}
+              selected={t.table_id === selectedId}
+              onClick={occupied ? () => setSelectedId(t.table_id) : undefined}
+            />
           );
         })}
       </div>
 
-      {target && (
-        <ConfirmRelease
-          table={target} busy={release.isPending} error={releaseError}
-          onCancel={() => setTarget(null)} onConfirm={confirmRelease}
-        />
+      {showModal && (
+        <TableOrderModal table={selected} now={now} onClose={() => setSelectedId(null)} />
       )}
     </div>
   );

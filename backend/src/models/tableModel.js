@@ -7,12 +7,16 @@ async function getTablesByBranch(branchId) {
   const { rows } = await pool.query(
     `SELECT tb.table_id, tb.branch_id, tb.table_number, tb.guest_capacity, tb.status,
             s.transaction_id AS seated_transaction_id, s.customer_name AS seated_customer,
-            s.guest_count AS seated_guests, s.transaction_at AS seated_at
+            s.guest_count AS seated_guests, s.transaction_at AS seated_at,
+            s.cashier_name AS seated_cashier, s.total_amount AS seated_total,
+            s.status AS seated_payment_status, s.order_status AS seated_order_status
       FROM tables tb
       LEFT JOIN LATERAL (
-        SELECT t.transaction_id, t.customer_name, t.guest_count, t.transaction_at
+        SELECT t.transaction_id, t.customer_name, t.guest_count, t.transaction_at,
+                t.total_amount, t.status, t.order_status, u.full_name AS cashier_name
         FROM transactions t
-        WHERE t.table_id = tb.table_id AND t.status = 'paid'
+        JOIN users u ON u.user_id = t.cashier_id
+        WHERE t.table_id = tb.table_id AND t.status IN ('paid', 'unpaid')
         ORDER BY t.transaction_at DESC LIMIT 1
       ) s ON tb.status = 'occupied'
       WHERE tb.branch_id = $1 AND tb.is_active = true
@@ -29,9 +33,17 @@ async function getTableById(id) {
 
 async function releaseTableById(id) {
   const { rows } = await pool.query(
-    `UPDATE tables SET status = 'available' WHERE table_id = $1 RETURNING *`, [id]
+    `UPDATE tables SET status = 'available'
+      WHERE table_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM transactions t WHERE t.table_id = tables.table_id AND t.status = 'unpaid'
+        )
+      RETURNING *`,
+    [id]
   );
-  return rows[0];
+  if (rows[0]) return rows[0];
+  if (await getTableById(id)) throw httpError(409, 'Settle payment before clearing the table.');
+  return undefined;
 }
 
 async function applyLayout(branchId, count, capacities = []) {

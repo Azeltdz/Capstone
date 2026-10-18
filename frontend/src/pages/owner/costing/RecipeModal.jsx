@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { useRecipe, useSaveRecipe } from "../../../hooks/useFoodcosting";
+import { useRecipe, useSaveRecipe } from "../../../hooks/useFoodCosting";
 import { useIngredients } from "../../../hooks/useIngredients";
 import { formatPeso } from "../../../utils/format";
 import { TARGET_FOOD_COST_PCT, costTone } from "../../../constants/costing";

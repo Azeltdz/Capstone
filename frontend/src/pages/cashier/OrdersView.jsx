@@ -1,10 +1,14 @@
 // src/pages/cashier/OrdersView.jsx
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { format } from "date-fns";
+import toast from "react-hot-toast";
 import { useOrders, useOrder } from "../../hooks/useOrders";
+import { useSettleOrder } from "../../hooks/useOrderActions";
+import StatusBadge from "../../components/StatusBadge";
 import { useDebounce } from "../../hooks/useDebounce";
 import PrintReceiptButton from "../../components/receipt/PrintReceiptButton";
-import { manilaToday } from "../../utils/format";
+import { manilaToday, paymentLabel } from "../../utils/format";
+import { PAYMENT_METHOD_OPTIONS } from "../../utils/orderStatus";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
@@ -17,6 +21,12 @@ const PAYMENT_OPTIONS = [
   { value: "all", label: "All Payments" },
   { value: "cash", label: "Cash" },
   { value: "gcash", label: "GCash" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "all", label: "Paid & Unpaid" },
+  { value: "paid", label: "Paid" },
+  { value: "unpaid", label: "Unpaid" },
 ];
 
 function badgeClassForType(type) {
@@ -48,6 +58,46 @@ function orderLabelFor(order) {
       ? `Dine-in · Table ${order.table_number}`
       : typeLabel(order.order_type);
   return order.guest_count ? `${base} · ${guestsLabel(order.guest_count)}` : base;
+}
+
+function SettleBox({ order }) {
+  const settle = useSettleOrder();
+  const [method, setMethod] = useState(null);
+  const [error, setError] = useState("");
+
+  async function confirm() {
+    setError("");
+    try {
+      await settle.mutateAsync({ orderId: order.transaction_id, payment_method: method });
+      toast.success("Payment received");
+    } catch (err) {
+      setError(err.message || "Couldn't record the payment. Please try again.");
+    }
+  }
+
+  return (
+    <div className="pay-panel" style={{ margin: "0.75rem 0" }}>
+      <span className="form-label">Settle payment · {formatPeso(order.total_amount)}</span>
+      <div className="payment-row">
+        {PAYMENT_METHOD_OPTIONS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            className={`payment-btn ${method === value ? "selected" : ""}`}
+            aria-pressed={method === value}
+            onClick={() => setMethod(value)}
+            disabled={settle.isPending}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {error && <p className="error-text" role="alert">{error}</p>}
+      <button type="button" className="btn btn-navy" onClick={confirm} disabled={!method || settle.isPending}>
+        {settle.isPending ? "Saving…" : "Confirm payment"}
+      </button>
+    </div>
+  );
 }
 
 function OrderDetailsModal({ orderId, onClose }) {
@@ -109,7 +159,14 @@ function OrderDetailsModal({ orderId, onClose }) {
               </div>
               <div>
                 <dt>Payment</dt>
-                <dd>{order.payment_method}</dd>
+                <dd>{order.payment_status === "unpaid" ? "Not paid yet" : paymentLabel(order.payment_method)}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  <StatusBadge kind="payment" value={order.payment_status} />{" "}
+                  <StatusBadge kind="order" value={order.order_status} />
+                </dd>
               </div>
               {order.table_number && (
                 <div>
@@ -140,16 +197,31 @@ function OrderDetailsModal({ orderId, onClose }) {
               </div>
               {order.items.map((it) => (
                 <div className="modal-items-row" key={it.tx_item_id}>
-                  <span>{it.item_name}</span>
+                  <span>
+                    {it.item_name}
+                    {it.note && <em className="receipt-item-note">Note: {it.note}</em>}
+                  </span>
                   <span>x{it.quantity}</span>
                 </div>
               ))}
             </div>
 
+            {Number(order.pwd_discount) > 0 && (
+              <dl className="modal-grid">
+                <div><dt>PWD</dt><dd>{order.pwd_name} · ID {order.pwd_id_number}</dd></div>
+                <div><dt>PWD discount (20%)</dt><dd>-{formatPeso(order.pwd_discount)}</dd></div>
+              </dl>
+            )}
+
             <div className="modal-total">
               <span>{order.items.reduce((sum, i) => sum + i.quantity, 0)} Items · Total</span>
               <span>{formatPeso(order.total_amount)}</span>
             </div>
+            {order.vat_amount != null && (
+              <p className="order-hint">VAT 12% included: {formatPeso(order.vat_amount)}</p>
+            )}
+
+            {order.payment_status === "unpaid" && <SettleBox order={order} />}
           </>
         )}
 
@@ -165,6 +237,7 @@ function OrderDetailsModal({ orderId, onClose }) {
 export default function OrdersView() {
   const [activeType, setActiveType] = useState("all");
   const [activePayment, setActivePayment] = useState("all");
+  const [activeStatus, setActiveStatus] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounce(searchInput, 300);
   const [date, setDate] = useState(() => manilaToday());
@@ -174,10 +247,9 @@ export default function OrdersView() {
 
   const { data: orders, isLoading, error } = useOrders({
     order_type: activeType === "all" ? undefined : activeType,
-    date,
-    search: search.trim() || undefined,
+    payment_status: activeStatus === "all" ? undefined : activeStatus,
+    date: activeStatus === "unpaid" ? undefined : date,
   });
-  // Payment isn't a server-side filter, so narrow the result here.
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
     return orders.filter((o) => activePayment === "all" || o.payment_method === activePayment);
@@ -195,10 +267,15 @@ export default function OrdersView() {
             value={date}
             onChange={(e) => setDate(e.target.value)}
             aria-label="Filter by date"
+            disabled={activeStatus === "unpaid"}
           />
 
           <select className="type-select" value={activeType} onChange={(e) => setActiveType(e.target.value)} aria-label="Filter by order type">
             {TYPE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+
+          <select className="type-select" value={activeStatus} onChange={(e) => setActiveStatus(e.target.value)} aria-label="Filter by payment status">
+            {STATUS_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
 
           <select className="type-select" value={activePayment} onChange={(e) => setActivePayment(e.target.value)} aria-label="Filter by payment method">
@@ -235,7 +312,8 @@ export default function OrdersView() {
                 </div>
                 <div className="order-card-status">
                   <span className={`badge ${badgeClassForType(order.order_type)}`}>{typeLabel(order.order_type)}</span>
-                  <span className="order-card-subtext">{order.payment_method}</span>
+                  <StatusBadge kind="payment" value={order.payment_status} />
+                  <span className="order-card-subtext">{order.payment_method ? paymentLabel(order.payment_method) : "Pay later"}</span>
                 </div>
               </div>
 

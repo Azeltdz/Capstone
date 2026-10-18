@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { homeFor } from "../constants/routes";
-import profilePic from "../assets/profile.jpg";
+import logo from "../assets/logo.png";
 
 const EYE_OPEN_PATH =
   "M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z";
@@ -11,7 +11,7 @@ const EYE_OPEN_PATH =
 const EYE_SLASH_PATH =
   "M2.71 3.27 1.29 4.69l3.17 3.17A10.94 10.94 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.63 0 3.17-.31 4.57-.87l3.14 3.14 1.42-1.42L2.71 3.27zM12 17c-2.76 0-5-2.24-5-5 0-1.1.36-2.12.96-2.94l1.42 1.42A3 3 0 0 0 12 15c.39 0 .77-.08 1.11-.22l1.57 1.57c-.82.41-1.73.65-2.68.65zm2.97-2.97-1.46-1.46A3 3 0 0 0 12 9c-.39 0-.77.08-1.11.22L9.43 7.76A5 5 0 0 1 17 12c0 .75-.17 1.47-.47 2.03L14.97 14.03zM12 6.5c3.2 0 6.08 1.83 7.67 5.5-.44 1.01-1.05 1.9-1.79 2.65l1.42 1.42A12.2 12.2 0 0 0 23 12C21.27 7.61 17 4.5 12 4.5c-1.03 0-2.03.13-2.98.38l1.57 1.57c.46-.03.93-.05 1.41-.05z";
 
-const HEADING = { cashier: "Cashier sign-in", owner: "Owner sign-in" };
+const HEADING = { cashier: "Cashier Sign-in", owner: "Owner Sign-in" };
 
 const NOTICES = {
   expired: "Your session expired. Please sign in again.",
@@ -69,10 +69,9 @@ export default function LoginPage({ portal = "cashier" }) {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit} noValidate>
-        <img className="login-logo" alt="Filipee's Bistro logo" src={profilePic} />
-        <h1 className="login-title">Filipee's Bistro</h1>
-        <p className="login-tagline">Masarap na Mura pa, Saan ka pa!</p>
-        <p className="login-tagline" style={{ fontWeight: 600 }}>{HEADING[portal]}</p>
+        <img className="login-logo" alt="Filipee's Bistro logo" src={logo} />
+        <h1 className="login-title">{HEADING[portal]}</h1>
+        <p className="login-text">Sign in to access the system</p>
 
         <div className="login-field">
           <label htmlFor="username">Username</label>
@@ -126,6 +125,7 @@ export default function LoginPage({ portal = "cashier" }) {
         <button type="submit" className="primary-btn" disabled={loading}>
           {loading ? "Signing in…" : "Log In"}
         </button>
+        <p className="login-text">Authorized personnel only</p>
       </form>
     </div>
   );
