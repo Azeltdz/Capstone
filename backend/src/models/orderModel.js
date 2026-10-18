@@ -8,7 +8,7 @@ const isConnectionError = (err) => /Connection terminated|ECONNRESET|ETIMEDOUT|t
 
 async function createOrderWithItems({
   branch_id, cashier_id, table_id, order_type, payment_method, payment_status = 'paid',
-  customer_name, guest_count, items, pwd,
+  customer_name, guest_count, items, pwd, amount_tendered,
 }) {
   const isPaid = payment_status === 'paid';
   const client = await pool.connect();
@@ -62,12 +62,15 @@ async function createOrderWithItems({
       };
     });
     const hasPwd = lines.some((l) => l.pwd_applied);
-    if (hasPwd && !(pwd?.name?.trim() && pwd?.id_number?.trim())) {
-      throw httpError(400, 'PWD name and ID number are required');
-    }
-    // Prices include 12% VAT. PWD lines are VAT-exempt and get 20% off the VAT-exclusive price.
+    const pwdName = hasPwd ? pwd?.name?.trim() || null : null; 
+    const pwdId = hasPwd ? pwd?.id_number?.trim() || null : null;
     const totals = calcOrderTotals(lines.map((l) => ({ price: l.unit_price, qty: l.quantity, pwd: l.pwd_applied })));
     const total_amount = totals.total;
+    // Cash handed over (cash only). The change is worked out from this and never stored.
+    const tendered = isPaid && payment_method === 'cash' && amount_tendered != null ? round2(Number(amount_tendered)) : null;
+    if (tendered !== null && tendered < total_amount) {
+      throw httpError(400, `Cash received (₱${tendered.toFixed(2)}) is less than the total (₱${total_amount.toFixed(2)})`);
+    }
     // 3. Stock: one query for every recipe line, one to lock the stock rows, one to deduct
     const { rows: recipe } = await client.query(
       `SELECT item_id, ingredient_id, quantity_per_unit FROM bill_of_materials WHERE item_id = ANY($1::int[])`,
@@ -144,16 +147,16 @@ async function createOrderWithItems({
       `INSERT INTO transactions
           (branch_id, cashier_id, table_id, order_type, status, order_status, total_amount, payment_method,
             customer_name, guest_count, subtotal_amount, vatable_sales, vat_amount, vat_exempt_sales,
-            pwd_discount, pwd_name, pwd_id_number, paid_at, transaction_at)
-        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+            pwd_discount, pwd_name, pwd_id_number, paid_at, amount_tendered, transaction_at)
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
        RETURNING *`,
       [
         branch_id, cashier_id, order_type === 'dine-in' ? table_id : null, order_type,
         isPaid ? 'paid' : 'unpaid', total_amount, isPaid ? payment_method : null,
         customer_name || null, guest_count || null,
         totals.subtotal, totals.vatableSales, totals.vatAmount, totals.vatExemptSales,
-        totals.pwdDiscount, hasPwd ? pwd.name.trim() : null, hasPwd ? pwd.id_number.trim() : null,
-        isPaid ? new Date() : null,
+        totals.pwdDiscount, pwdName, pwdId,
+        isPaid ? new Date() : null, tendered,
       ]
     );
 
@@ -194,6 +197,8 @@ async function createOrderWithItems({
       vat_amount: totals.vatAmount,
       vat_exempt_sales: totals.vatExemptSales,
       pwd_discount: totals.pwdDiscount,
+      amount_tendered: tendered,
+      change_amount: tendered === null ? null : round2(tendered - total_amount),
     };
   } catch (err) {
     destroy = isConnectionError(err);
@@ -266,23 +271,29 @@ async function getOrderById(id) {
   return rows[0] ?? null;
 }
 
-async function settleOrder({ id, payment_method, branch_id = null }) {
+async function settleOrder({ id, payment_method, amount_tendered = null, branch_id = null }) {
+  const tendered = payment_method === 'cash' && amount_tendered != null ? round2(Number(amount_tendered)) : null;
   const { rows } = await pool.query(
     `UPDATE transactions
-        SET status = 'paid', payment_method = $2, paid_at = NOW()
+        SET status = 'paid', payment_method = $2::text, paid_at = NOW(), amount_tendered = $4::numeric
       WHERE transaction_id = $1 AND status = 'unpaid'
         AND ($3::int IS NULL OR branch_id = $3)
+        AND ($4::numeric IS NULL OR $4::numeric >= total_amount)
       RETURNING transaction_id`,
-    [id, payment_method, branch_id]
+    [id, payment_method, branch_id, tendered]
   );
   if (rows.length) return getOrderById(id);
 
   const { rows: found } = await pool.query(
-    'SELECT branch_id, status FROM transactions WHERE transaction_id = $1',
+    'SELECT branch_id, status, total_amount FROM transactions WHERE transaction_id = $1',
     [id]
   );
   if (!found.length || (branch_id && found[0].branch_id !== branch_id)) throw httpError(404, 'Order not found');
-  throw httpError(409, found[0].status === 'paid' ? 'Order is already paid' : 'This order cannot be paid');
+  if (found[0].status === 'paid') throw httpError(409, 'Order is already paid');
+  if (found[0].status === 'unpaid') {
+    throw httpError(400, `Cash received (₱${tendered.toFixed(2)}) is less than the total (₱${Number(found[0].total_amount).toFixed(2)})`);
+  }
+  throw httpError(409, 'This order cannot be paid');
 }
 
 async function completeOrder({ id, branch_id = null }) {

@@ -1,174 +1,149 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { useModal } from "../../../hooks/useModal";
+import { useOrder } from "../../../hooks/useOrders";
 import { useReleaseTable } from "../../../hooks/useTables";
-import { useSettleOrder, useUpdateOrderStatus } from "../../../hooks/useOrderActions";
+import { useUpdateOrderStatus } from "../../../hooks/useOrderActions";
+import { useModal } from "../../../hooks/useModal";
 import StatusBadge from "../../../components/StatusBadge";
-import { formatOrderNumber, formatPeso } from "../../../utils/format";
-import { getTableTone, PAYMENT_METHOD_OPTIONS } from "../../../utils/orderStatus";
+import ConfirmDialog from "../../../components/ConfirmDialog";
+import SettlePayment from "../../../components/payment/SettlePayment";
+import PrintReceiptButton from "../../../components/receipt/PrintReceiptButton";
+import { formatOrderNumber, formatPeso, paymentLabel } from "../../../utils/format";
+import { calcChange } from "../../../utils/pricing";
 
-function elapsedLabel(since, now) {
-  const mins = Math.max(0, Math.floor((now - new Date(since).getTime()) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  return `${Math.floor(mins / 60)} h ${mins % 60} min ago`;
-}
-
-export default function TableOrderModal({ table, now, onClose }) {
-  const settle = useSettleOrder();
-  const markCompleted = useUpdateOrderStatus();
-  const release = useReleaseTable();
-
-  const [paying, setPaying] = useState(false);
-  const [method, setMethod] = useState(null);
+// Opens when the cashier taps a seated table: see the bill, settle it, mark it completed, clear the table.
+export default function TableOrderModal({ table, onClose }) {
   const [confirmClear, setConfirmClear] = useState(false);
-  const [error, setError] = useState("");
-
-  const busy = settle.isPending || markCompleted.isPending || release.isPending;
+  const [clearError, setClearError] = useState("");
   useModal(() => {
-    if (!busy) onClose();
+    if (!confirmClear) onClose();
   });
 
-  const orderId = table.seated_transaction_id;
-  const isPaid = getTableTone(table) === "paid";
-  const orderStatus = table.seated_order_status ?? "pending";
-  const total = table.seated_total != null ? formatPeso(Number(table.seated_total)) : "—";
+  const { data: order, isLoading, error } = useOrder(table.seated_transaction_id);
+  const complete = useUpdateOrderStatus();
+  const release = useReleaseTable();
 
-  async function run(action, successMessage) {
-    setError("");
+  const unpaid = order?.payment_status === "unpaid";
+  const tendered = order?.amount_tendered != null ? Number(order.amount_tendered) : null;
+
+  async function markCompleted() {
     try {
-      await action();
-      if (successMessage) toast.success(successMessage);
-      return true;
+      await complete.mutateAsync({ orderId: order.transaction_id, order_status: "completed" });
+      toast.success("Order marked completed");
     } catch (err) {
-      setError(err.message || "Something went wrong. Please try again.");
-      return false;
+      toast.error(err.message || "Couldn't update the order");
     }
   }
 
-  async function handleSettle() {
-    const ok = await run(
-      () => settle.mutateAsync({ orderId, payment_method: method }),
-      `Payment received · ${total}`
-    );
-    if (ok) {
-      setPaying(false);
-      setMethod(null);
+  async function clearTable() {
+    setClearError("");
+    try {
+      await release.mutateAsync(table.table_id);
+      toast.success(`Table ${table.table_number} is now available`);
+      setConfirmClear(false);
+      onClose();
+    } catch (err) {
+      setClearError(err.message);
     }
   }
-
-  function handleComplete() {
-    return run(
-      () => markCompleted.mutateAsync({ orderId, order_status: "completed" }),
-      "Order marked as completed"
-    );
-  }
-
-  async function handleClear() {
-    const ok = await run(
-      () => release.mutateAsync(table.table_id),
-      `Table ${table.table_number} is now available`
-    );
-    if (ok) onClose();
-  }
-
-  const details = [
-    ["Customer", table.seated_customer || "—"],
-    ["Guests", table.seated_guests ? `${table.seated_guests} of ${table.guest_capacity} seats` : "—"],
-    ["Cashier", table.seated_cashier || "—"],
-    ["Seated", table.seated_at ? elapsedLabel(table.seated_at, now) : "—"],
-    ["Total", total],
-  ];
 
   return (
-    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="table-order-title">
-        <div className="modal-header">
-          <div>
-            <h3 id="table-order-title">Table {table.table_number}</h3>
-            {orderId && <span className="receipt-id">{formatOrderNumber(orderId)}</span>}
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} disabled={busy} aria-label="Close">×</button>
-        </div>
-
-        <div className="modal-body">
-          <div className="receipt-statuses">
-            <StatusBadge kind="payment" value={isPaid ? "paid" : "unpaid"} />
-            <StatusBadge kind="order" value={orderStatus} />
-          </div>
-
-          <dl className="receipt-details">
-            {details.map(([label, value]) => (
-              <div className="receipt-row" key={label}>
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-
-          {error && <p className="form-error" role="alert">{error}</p>}
-
-          {paying && !isPaid && (
-            <div className="pay-panel">
-              <span className="form-label" id="settle-method-label">Payment method</span>
-              <div className="payment-row" role="group" aria-labelledby="settle-method-label">
-                {PAYMENT_METHOD_OPTIONS.map(({ value, label }) => (
-                  <button
-                    key={value} type="button"
-                    className={`payment-btn ${method === value ? "selected" : ""}`}
-                    aria-pressed={method === value} onClick={() => setMethod(value)} disabled={busy}
-                  >{label}</button>
-                ))}
-              </div>
-              <div className="confirm-row">
-                <button type="button" className="btn btn-outline" onClick={() => setPaying(false)} disabled={busy}>
-                  Back
-                </button>
-                <button type="button" className="btn btn-navy" onClick={handleSettle} disabled={!method || busy}>
-                  {settle.isPending ? "Saving…" : `Confirm payment · ${total}`}
-                </button>
+    <>
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal-card table-modal" role="dialog" aria-modal="true" aria-label={`Table ${table.table_number}`} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <h3 className="modal-title">Table {table.table_number}</h3>
+              <div className="modal-subtitle">
+                {formatOrderNumber(table.seated_transaction_id)}
+                {table.seated_customer ? ` · ${table.seated_customer}` : ""}
+                {table.seated_guests ? ` · ${table.seated_guests} guests` : ""}
               </div>
             </div>
-          )}
+            <button type="button" className="modal-close" onClick={onClose} aria-label="Close">✕</button>
+          </div>
 
-          {!paying && (
-            <div className="table-order-actions">
-              {!isPaid && (
-                <button type="button" className="btn btn-navy" onClick={() => setPaying(true)} disabled={busy}>
-                  Settle payment · {total}
-                </button>
-              )}
-              {orderStatus !== "completed" && (
-                <button type="button" className="btn btn-outline" onClick={handleComplete} disabled={busy}>
-                  {markCompleted.isPending ? "Saving…" : "Mark as completed"}
-                </button>
-              )}
+          {isLoading && <p className="loading-text">Loading order…</p>}
+          {error && <p className="error-text">Couldn't load this order. {error.message}</p>}
 
-              {confirmClear ? (
-                <div className="pay-panel">
-                  <p className="order-hint">Only clear it once the guests have left. It becomes available right away.</p>
-                  <div className="confirm-row">
-                    <button type="button" className="btn btn-outline" onClick={() => setConfirmClear(false)} disabled={busy}>
-                      Cancel
-                    </button>
-                    <button type="button" className="btn btn-navy" onClick={handleClear} disabled={busy} autoFocus>
-                      {release.isPending ? "Clearing…" : "Yes, clear table"}
-                    </button>
+          {order && (
+            <>
+              <p>
+                <StatusBadge kind="payment" value={order.payment_status} />{" "}
+                <StatusBadge kind="order" value={order.order_status} />
+              </p>
+
+              <div className="modal-items">
+                <div className="modal-items-head"><span>Item</span><span>Amount</span></div>
+                {order.items.map((it) => (
+                  <div className="modal-items-row" key={it.tx_item_id}>
+                    <span>
+                      {it.quantity}× {it.item_name}
+                      {it.pwd_applied && <em className="receipt-item-note">PWD</em>}
+                      {it.note && <em className="receipt-item-note">Note: {it.note}</em>}
+                    </span>
+                    <span>{formatPeso(it.subtotal)}</span>
                   </div>
-                </div>
-              ) : (
+                ))}
+              </div>
+
+              {Number(order.pwd_discount) > 0 && (
+                <p className="pay-hint">
+                  PWD discount −{formatPeso(order.pwd_discount)}
+                  {order.pwd_name ? ` · ${order.pwd_name}` : ""}{order.pwd_id_number ? ` · ID ${order.pwd_id_number}` : ""}
+                </p>
+              )}
+
+              <div className="modal-total">
+                <span>{unpaid ? "Amount due" : "Total"}</span>
+                <span>{formatPeso(order.total_amount)}</span>
+              </div>
+              {order.vat_amount != null && <p className="order-hint">VAT 12% included: {formatPeso(order.vat_amount)}</p>}
+
+              {!unpaid && (
+                <dl className="placed-figures">
+                  <div><dt>Paid by</dt><dd>{paymentLabel(order.payment_method)}</dd></div>
+                  {tendered !== null && <div><dt>Cash received</dt><dd>{formatPeso(tendered)}</dd></div>}
+                  {tendered !== null && <div className="placed-change"><dt>Change</dt><dd>{formatPeso(calcChange(tendered, order.total_amount))}</dd></div>}
+                </dl>
+              )}
+
+              {unpaid && <SettlePayment order={order} />}
+
+              <div className="confirm-actions table-modal-actions">
+                <PrintReceiptButton orderId={order.transaction_id} copy={!unpaid} />
+                {order.order_status === "pending" && (
+                  <button type="button" className="btn-outline" onClick={markCompleted} disabled={complete.isPending}>
+                    {complete.isPending ? "Saving…" : "Mark completed"}
+                  </button>
+                )}
                 <button
-                  type="button" className="btn btn-outline"
-                  onClick={() => setConfirmClear(true)} disabled={!isPaid || busy}
+                  type="button"
+                  className="btn-solid"
+                  onClick={() => { setClearError(""); setConfirmClear(true); }}
+                  disabled={unpaid}
+                  title={unpaid ? "Settle the payment first" : undefined}
                 >
                   Clear table
                 </button>
-              )}
-              {!isPaid && <p className="order-hint">Settle payment before clearing the table.</p>}
-            </div>
+              </div>
+              {unpaid && <p className="pay-hint">Settle the payment first. A table with an unpaid bill can't be cleared.</p>}
+            </>
           )}
         </div>
       </div>
-    </div>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title={`Clear Table ${table.table_number}?`}
+          message="Only clear it once the guests have left. It becomes available for the next party right away."
+          confirmLabel="Clear table"
+          busy={release.isPending}
+          error={clearError}
+          onConfirm={clearTable}
+          onCancel={() => setConfirmClear(false)}
+        />
+      )}
+    </>
   );
 }

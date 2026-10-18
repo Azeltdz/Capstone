@@ -10,7 +10,7 @@ const num = (v) => (v === null || v === undefined ? null : Number(v));
 async function placeOrder(req, res, next) {
   try {
     const {
-      table_id, order_type, payment_method, payment_status, items, customer_name, guest_count, pwd,
+      table_id, order_type, payment_method, payment_status, items, customer_name, guest_count, pwd, amount_tendered,
     } = req.body;
 
     const branch_id = req.user.role === 'cashier' ? req.user.branch_id : req.body.branch_id;
@@ -23,7 +23,7 @@ async function placeOrder(req, res, next) {
     const order = await createOrderWithItems({
       branch_id, cashier_id: req.user.user_id, table_id, order_type, payment_method,
       payment_status: payment_status || 'paid',
-      customer_name, guest_count, items, pwd,
+      customer_name, guest_count, items, pwd, amount_tendered,
     });
 
     res.status(201).json({ message: 'Order placed', order });
@@ -63,7 +63,8 @@ async function settlePayment(req, res, next) {
   try {
     const branch_id = req.user.role === 'cashier' ? req.user.branch_id : null;
     const order = await settleOrder({
-      id: Number(req.params.id), payment_method: req.body.payment_method, branch_id,
+      id: Number(req.params.id), payment_method: req.body.payment_method,
+      amount_tendered: req.body.amount_tendered, branch_id,
     });
     res.json({ message: 'Payment recorded', order });
   } catch (err) {
@@ -118,6 +119,8 @@ async function getReceipt(req, res, next) {
       pwd_discount: Number(order.pwd_discount ?? 0),
       pwd_name: order.pwd_name ?? null,
       pwd_id_number: order.pwd_id_number ?? null,
+      amount_tendered: num(order.amount_tendered),
+      change_amount: order.amount_tendered == null ? null : Math.round((Number(order.amount_tendered) - Number(order.total_amount)) * 100) / 100,
       total_amount: Number(order.total_amount),
     });
   } catch (err) {

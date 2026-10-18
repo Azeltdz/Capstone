@@ -1,72 +1,78 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useModal } from "../../../hooks/useModal";
+import { LIMITS, check, guestsSchema } from "../../../validation/orderSchemas";
 
-const MIN_GUESTS = 1;
-const MAX_GUESTS = 20;
-const QUICK_PICKS = [1, 2, 3, 4, 5, 6];
-
-export default function GuestsModal({ table, initial = MIN_GUESTS, onSubmit, onClose }) {
-  const [guests, setGuests] = useState(initial);
-  const overCapacity = table.guest_capacity && guests > table.guest_capacity;
-
+export default function GuestsModal({ table, onSubmit, onClose }) {
   useModal(onClose);
+  const id = useId();
+  const [value, setValue] = useState(String(Math.min(2, table.guest_capacity || 2)));
+  const [touched, setTouched] = useState(false);
 
-  function handleSubmit(e) {
+  const parsed = check(guestsSchema, value);
+  const guests = parsed.value;
+  const over = guests !== undefined && table.guest_capacity && guests > table.guest_capacity;
+  const showError = touched && parsed.error;
+  const chips = Array.from({ length: Math.min(Math.max(table.guest_capacity || 4, 4), 8) }, (_, i) => i + 1);
+
+  function step(delta) {
+    const n = Number(value) || 0;
+    setValue(String(Math.min(LIMITS.guestsMax, Math.max(LIMITS.guestsMin, n + delta))));
+    setTouched(true);
+  }
+
+  function submit(e) {
     e.preventDefault();
-    onSubmit(guests);
+    setTouched(true);
+    if (guests !== undefined) onSubmit(guests);
   }
 
   return (
-    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="guests-title">
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal-card guests-modal" role="dialog" aria-modal="true" aria-label={`Guests at table ${table.table_number}`} onClick={(e) => e.stopPropagation()} onSubmit={submit} noValidate>
         <div className="modal-header">
           <div>
-            <h3 id="guests-title">Table {table.table_number}</h3>
-            {table.guest_capacity ? <span className="order-id">Seats {table.guest_capacity}</span> : null}
+            <h3 className="modal-title">Table {table.table_number}</h3>
+            <div className="modal-subtitle">Seats {table.guest_capacity}. How many guests?</div>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit}>
-          <div className="form-field">
-            <span className="form-label" id="guest-label">How many guests?</span>
-            <div className="guest-stepper" role="group" aria-labelledby="guest-label">
-              <button
-                type="button" className="guest-btn" aria-label="Remove one guest"
-                onClick={() => setGuests((g) => Math.max(MIN_GUESTS, g - 1))} disabled={guests <= MIN_GUESTS}
-              >−</button>
-              <span className="guest-count" aria-live="polite">
-                {guests} {guests === 1 ? "Person" : "People"}
-              </span>
-              <button
-                type="button" className="guest-btn" aria-label="Add one guest"
-                onClick={() => setGuests((g) => Math.min(MAX_GUESTS, g + 1))} disabled={guests >= MAX_GUESTS}
-              >+</button>
-            </div>
+        <label className="form-label" htmlFor={id}>Number of guests</label>
+        <div className="guests-stepper">
+          <button type="button" className="stepper-btn" onClick={() => step(-1)} aria-label="One fewer guest" disabled={!(guests > LIMITS.guestsMin)}>−</button>
+          <input
+            id={id}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            autoFocus
+            maxLength={2}
+            value={value}
+            onChange={(e) => { setValue(e.target.value.replace(/\D/g, "")); setTouched(true); }}
+            aria-invalid={!!showError}
+            aria-describedby={`${id}-msg`}
+          />
+          <button type="button" className="stepper-btn stepper-btn--plus" onClick={() => step(1)} aria-label="One more guest" disabled={guests >= LIMITS.guestsMax}>+</button>
+        </div>
 
-            <div className="guest-chips" role="group" aria-label="Quick pick">
-              {QUICK_PICKS.map((n) => (
-                <button
-                  key={n} type="button"
-                  className={`guest-chip ${guests === n ? "is-active" : ""}`}
-                  aria-pressed={guests === n}
-                  onClick={() => setGuests(n)}
-                >{n}</button>
-              ))}
-            </div>
+        <div className="pay-quick" aria-label="Common group sizes">
+          {chips.map((n) => (
+            <button key={n} type="button" className={`pay-chip ${guests === n ? "is-on" : ""}`} onClick={() => { setValue(String(n)); setTouched(true); }}>
+              {n}
+            </button>
+          ))}
+        </div>
 
-            {overCapacity && (
-              <p className="order-hint order-hint--warn" role="status">
-                This table seats {table.guest_capacity}. Continue only if you're joining tables.
-              </p>
-            )}
-          </div>
+        <div id={`${id}-msg`} aria-live="polite">
+          {showError && <p className="field-error">{parsed.error}</p>}
+          {!showError && over && <p className="pay-hint">That's more than the table's {table.guest_capacity} seats. You can still continue.</p>}
+        </div>
 
-          <button type="submit" className="btn btn-navy modal-submit" autoFocus>
-            Continue to menu
-          </button>
-        </form>
-      </div>
+        <div className="confirm-actions">
+          <button type="button" className="btn-outline" onClick={onClose}>Back</button>
+          <button type="submit" className="btn-solid" disabled={guests === undefined}>Start order</button>
+        </div>
+      </form>
     </div>
   );
 }

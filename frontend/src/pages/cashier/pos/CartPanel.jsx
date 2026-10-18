@@ -1,262 +1,188 @@
-import { useMemo, useState } from "react";
-import { Bike, ShoppingBag, StickyNote, UtensilsCrossed } from "lucide-react";
+import { useId, useMemo, useState } from "react";
 import MenuImage from "../../../components/MenuImage";
-import { calcOrderTotals, PWD_DISCOUNT_RATE, VAT_RATE } from "../../../utils/pricing";
 import { formatPeso } from "../../../utils/format";
-import { ORDER_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS } from "../../../utils/orderStatus";
+import { calcOrderTotals } from "../../../utils/pricing";
+import { LIMITS } from "../../../validation/orderSchemas";
 
-const TYPE_ICONS = { "dine-in": UtensilsCrossed, "take-out": ShoppingBag, delivery: Bike };
-const MAX_NOTE = 120;
-const pct = (rate) => Math.round(rate * 100);
+const TYPE_META = {
+  "dine-in": { icon: "🍽️", label: "Dine-in" },
+  "take-out": { icon: "🥡", label: "Take-out" },
+  delivery: { icon: "🛵", label: "Delivery" },
+};
 
-/** Per-item request (e.g. "Leg part") + the line's PWD checkbox. */
-function LineExtras({ line, pwdEnabled, onNoteChange, onTogglePwd }) {
-  const [open, setOpen] = useState(false);
-  const showInput = open || !!line.note;
+const cleanText = (s) => s.replace(/[\u0000-\u001F\u007F<>]/g, "");
+const cleanId = (s) => s.replace(/[^A-Za-z0-9\-/ ]/g, "");
 
+function CartLine({ line, pwdOn, onQtyChange, onNoteChange, onTogglePwd }) {
+  const [noteOpen, setNoteOpen] = useState(Boolean(line.note));
+  const noteId = useId();
   return (
-    <div className="order-line-extras">
-      {showInput ? (
-        <input
-          className="line-note-input"
-          type="text"
-          autoFocus={open}
-          maxLength={MAX_NOTE}
-          value={line.note ?? ""}
-          placeholder="e.g. Leg part, no onions"
-          aria-label={`Note for ${line.name}`}
-          onChange={(e) => onNoteChange(line.id, e.target.value)}
-          onBlur={() => {
-            if (!line.note?.trim()) {
-              onNoteChange(line.id, "");
-              setOpen(false);
-            }
-          }}
-        />
-      ) : (
-        <button type="button" className="line-note-btn" onClick={() => setOpen(true)}>
-          <StickyNote size={14} aria-hidden="true" /> Add note
-        </button>
-      )}
+    <div className="order-line">
+      <div className="order-line-info">
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <MenuImage variant="thumb" url={line.image_url} category={line.category} />
+          <span className="order-line-name">{line.name}</span>
+        </span>
+        <span className="order-line-qty">x{line.qty}</span>
+      </div>
 
-      {pwdEnabled && (
-        <label className="line-pwd">
-          <input type="checkbox" checked={line.pwd !== false} onChange={() => onTogglePwd(line.id)} />
-          PWD
-        </label>
-      )}
+      <div className="order-line-footer">
+        <div className="order-line-actions">
+          <button type="button" className="order-line-add" onClick={() => onQtyChange(line, line.qty + 1)} disabled={line.qty >= 99} aria-label={`Add one ${line.name}`}>＋</button>
+          <button type="button" className="order-line-minus" onClick={() => onQtyChange(line, line.qty - 1)} disabled={line.qty <= 1} aria-label={`Remove one ${line.name}`}>－</button>
+          <button type="button" className="order-line-remove" onClick={() => onQtyChange(line, 0)} aria-label={`Delete ${line.name}`}>🗑</button>
+        </div>
+        <span className="order-line-price">{formatPeso(line.price * line.qty)}</span>
+      </div>
+
+      <div className="order-line-extras">
+        {!noteOpen ? (
+          <button type="button" className="btn-text" onClick={() => setNoteOpen(true)}>＋ Add note</button>
+        ) : (
+          <div className="line-note">
+            <label className="sr-only" htmlFor={noteId}>Note for {line.name}</label>
+            <input
+              id={noteId}
+              type="text"
+              className="form-input"
+              placeholder="e.g. leg part, no onions"
+              maxLength={LIMITS.note}
+              value={line.note ?? ""}
+              onChange={(e) => onNoteChange(line.id, cleanText(e.target.value))}
+              autoComplete="off"
+            />
+            <span className="line-note-count" aria-hidden="true">{(line.note ?? "").length}/{LIMITS.note}</span>
+          </div>
+        )}
+        {pwdOn && (
+          <label className="line-pwd">
+            <input type="checkbox" checked={Boolean(line.pwd)} onChange={() => onTogglePwd(line.id)} />
+            PWD
+          </label>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function CartPanel({
-  orderLabel, orderType, onOrderTypeChange, table, guests, onChangeTable,
-  customerName, nameRequired, onCustomerNameChange,
-  cart, onQtyChange, onNoteChange, onTogglePwdLine,
-  pwd, onPwdChange,
-  payNow, onPayNowChange, paymentMethod, onSelectPayment,
-  blockers, onPlaceOrder, onCancel, isPlacing,
+  orderLabel, mode, table, guests, cart, onQtyChange, onNoteChange, onTogglePwd,
+  customerName, onCustomerName, pwd, onPwdChange, payTiming, onPayTimingChange,
+  errors, submitted, onSubmit, onCancel, isPlacing,
 }) {
-  const lines = useMemo(() => Object.values(cart), [cart]);
-  const totals = useMemo(() => calcOrderTotals(lines, { pwdEnabled: pwd.enabled }), [lines, pwd.enabled]);
-  const canPlaceOrder = blockers.length === 0 && !isPlacing;
+  const nameId = useId();
+  const pwdNameId = useId();
+  const pwdIdId = useId();
+  const lines = Object.values(cart);
+  const itemCount = lines.reduce((s, l) => s + l.qty, 0);
+  const totals = useMemo(
+    () => calcOrderTotals(lines.map((l) => ({ price: l.price, qty: l.qty, pwd: pwd.enabled && l.pwd }))),
+    [lines, pwd.enabled]
+  );
+  const meta = TYPE_META[mode] ?? TYPE_META["take-out"];
+  const hasPwdDiscount = totals.pwdDiscount > 0;
+  const payNow = payTiming === "now";
 
   return (
     <aside className="order-panel" aria-label="Current order">
       <div className="order-panel-scroll">
-        <div className="order-panel-header">
-          <h3>Current Order</h3>
-          <span className="order-id">{orderLabel}</span>
-        </div>
-
-        {/* Order type */}
-        <div className="segmented" role="radiogroup" aria-label="Order type">
-          {ORDER_TYPE_OPTIONS.map(({ value, label }) => {
-            const Icon = TYPE_ICONS[value];
-            const active = orderType === value;
-            return (
-              <button
-                key={value} type="button" role="radio" aria-checked={active}
-                className={`segmented-btn ${active ? "is-active" : ""}`}
-                onClick={() => onOrderTypeChange(value)}
-              >
-                <Icon size={16} aria-hidden="true" /> {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Table + guests (dine-in only) */}
-        {orderType === "dine-in" && (
-          <div className={`order-context ${table ? "" : "is-empty"}`}>
-            {table ? (
-              <>
-                <span>
-                  <strong>Table {table.table_number}</strong> · {guests} {guests === 1 ? "guest" : "guests"}
-                </span>
-                <button type="button" className="link-btn" onClick={onChangeTable}>Change</button>
-              </>
-            ) : (
-              <>
-                <span>No table selected</span>
-                <button type="button" className="link-btn" onClick={onChangeTable}>Select table</button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Customer name */}
-        <div className="form-field">
-          <label className="form-label" htmlFor="cart-customer-name">
-            Customer name{!nameRequired && <span className="optional"> (optional)</span>}
-          </label>
-          <input
-            id="cart-customer-name" className="form-input" type="text" autoComplete="off"
-            maxLength={100} value={customerName} placeholder="Enter customer name"
-            onChange={(e) => onCustomerNameChange(e.target.value)}
-          />
-        </div>
-
-        {/* Items */}
-        {lines.length === 0 ? (
-          <p className="order-panel-placeholder">
-            {orderType === "dine-in" && !table
-              ? "Select a table or choose Take-out / Delivery to begin."
-              : "No items added yet — select items from the menu."}
-          </p>
-        ) : (
-          <div className="order-lines">
-            {lines.map((line) => (
-              <div className="order-line" key={line.id}>
-                <div className="order-line-info">
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <MenuImage variant="thumb" url={line.image_url} category={line.category} />
-                    <span className="order-line-name">{line.name}</span>
-                  </span>
-                  <span className="order-line-qty">×{line.qty}</span>
-                </div>
-                <div className="order-line-footer">
-                  <div className="order-line-actions">
-                    <button type="button" className="order-line-add" onClick={() => onQtyChange(line, line.qty + 1)} aria-label={`Add one ${line.name}`}>＋</button>
-                    <button type="button" className="order-line-minus" onClick={() => onQtyChange(line, line.qty - 1)} disabled={line.qty <= 1} aria-label={`Remove one ${line.name}`}>－</button>
-                    <button type="button" className="order-line-remove" onClick={() => onQtyChange(line, 0)} aria-label={`Delete ${line.name}`}>🗑</button>
-                  </div>
-                  <span className="order-line-price">{formatPeso(line.price * line.qty)}</span>
-                </div>
-                <LineExtras
-                  line={line} pwdEnabled={pwd.enabled}
-                  onNoteChange={onNoteChange} onTogglePwd={onTogglePwdLine}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* PWD discount */}
-        {lines.length > 0 && (
-          <div className="pwd-box">
-            <label className="switch-row">
-              <input
-                type="checkbox" role="switch" checked={pwd.enabled}
-                onChange={(e) => onPwdChange({ enabled: e.target.checked })}
-              />
-              <span>
-                PWD discount <small>{pct(PWD_DISCOUNT_RATE)}% off · VAT-exempt</small>
-              </span>
-            </label>
-            {pwd.enabled && (
-              <div className="pwd-fields">
-                <input
-                  className="form-input" type="text" maxLength={100} autoComplete="off"
-                  aria-label="PWD full name" placeholder="PWD full name"
-                  value={pwd.name} onChange={(e) => onPwdChange({ name: e.target.value })}
-                />
-                <input
-                  className="form-input" type="text" maxLength={50} autoComplete="off"
-                  aria-label="PWD ID number" placeholder="PWD ID number"
-                  value={pwd.idNumber} onChange={(e) => onPwdChange({ idNumber: e.target.value })}
-                />
-                <p className="order-hint">
-                  Applies to items ticked “PWD” above. Untick dishes the PWD isn't eating.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+      <div className="order-panel-header">
+        <h3>Current Order</h3>
+        <span className="order-id">{orderLabel}</span>
       </div>
 
-      <div className="order-panel-footer">
-        <div className="order-summary">
-          <div className="order-summary-row">
-            <span>Subtotal (VAT incl.)</span>
-            <span>{formatPeso(totals.subtotal)}</span>
-          </div>
-          {pwd.enabled && totals.pwdDiscount > 0 && (
+      {/* Read-only: to change these, use Back on the menu. */}
+      <dl className="cart-meta">
+        <div><dt>Order type</dt><dd><span aria-hidden="true">{meta.icon}</span> {meta.label}</dd></div>
+        {mode === "dine-in" && table && (
+          <>
+            <div><dt>Table</dt><dd>Table {table.table_number}</dd></div>
+            <div><dt>Guests</dt><dd>{guests} {guests === 1 ? "guest" : "guests"}</dd></div>
+          </>
+        )}
+      </dl>
+
+      <div className="form-field cart-field">
+        <label className="form-label" htmlFor={nameId}>Customer name <span className="optional">(optional)</span></label>
+        <input
+          id={nameId}
+          type="text"
+          className="form-input"
+          maxLength={LIMITS.customerName}
+          value={customerName}
+          onChange={(e) => onCustomerName(cleanText(e.target.value))}
+          autoComplete="off"
+          aria-invalid={!!errors.customerName}
+        />
+        {errors.customerName && <p className="field-error">{errors.customerName}</p>}
+      </div>
+
+      {lines.length === 0 ? (
+        <p className="order-panel-placeholder">No items added yet — select items from the menu.</p>
+      ) : (
+        <div className="order-lines">
+          {lines.map((line) => (
+            <CartLine key={line.id} line={line} pwdOn={pwd.enabled} onQtyChange={onQtyChange} onNoteChange={onNoteChange} onTogglePwd={onTogglePwd} />
+          ))}
+        </div>
+      )}
+      {submitted && errors.lineCount && <p className="field-error">{errors.lineCount}</p>}
+
+      {lines.length > 0 && (
+        <div className="pwd-box">
+          <label className="pwd-toggle">
+            <input type="checkbox" checked={pwd.enabled} onChange={(e) => onPwdChange({ enabled: e.target.checked })} />
+            <span>PWD discount <small>(20% off, VAT-exempt)</small></span>
+          </label>
+          {pwd.enabled && (
             <>
-              <div className="order-summary-row">
-                <span>VAT exemption (PWD)</span>
-                <span>−{formatPeso(totals.vatExemption)}</span>
-              </div>
-              <div className="order-summary-row">
-                <span>PWD discount ({pct(PWD_DISCOUNT_RATE)}%)</span>
-                <span>−{formatPeso(totals.pwdDiscount)}</span>
+              <p className="pay-hint">Untick any shared dish the PWD isn't eating. Only ticked items get the discount.</p>
+              {submitted && errors.pwdItems && <p className="field-error">{errors.pwdItems}</p>}
+              <div className="pwd-fields">
+                <div className="form-field">
+                  <label className="form-label" htmlFor={pwdNameId}>PWD name <span className="optional">(optional)</span></label>
+                  <input id={pwdNameId} type="text" className="form-input" maxLength={LIMITS.pwdName} value={pwd.name} onChange={(e) => onPwdChange({ name: cleanText(e.target.value) })} autoComplete="off" aria-invalid={!!errors.pwdName} />
+                  {errors.pwdName && <p className="field-error">{errors.pwdName}</p>}
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor={pwdIdId}>PWD ID number <span className="optional">(optional)</span></label>
+                  <input id={pwdIdId} type="text" className="form-input" maxLength={LIMITS.pwdId} value={pwd.id} onChange={(e) => onPwdChange({ id: cleanId(e.target.value) })} autoComplete="off" aria-invalid={!!errors.pwdId} />
+                  {errors.pwdId && <p className="field-error">{errors.pwdId}</p>}
+                </div>
               </div>
             </>
           )}
-          <div className="order-summary-row order-summary-total">
-            <span>Total ({totals.itemCount} items)</span>
-            <span>{formatPeso(totals.total)}</span>
-          </div>
-          <div className="order-summary-row order-summary-note">
-            <span>VAT {pct(VAT_RATE)}% included</span>
-            <span>{formatPeso(totals.vatAmount)}</span>
-          </div>
         </div>
+      )}
 
-        {/* Payment timing */}
-        <div className="segmented segmented--sm" role="radiogroup" aria-label="Payment timing">
-          <button
-            type="button" role="radio" aria-checked={payNow}
-            className={`segmented-btn ${payNow ? "is-active" : ""}`} onClick={() => onPayNowChange(true)}
-          >Pay now</button>
-          <button
-            type="button" role="radio" aria-checked={!payNow}
-            className={`segmented-btn ${!payNow ? "is-active" : ""}`} onClick={() => onPayNowChange(false)}
-          >Pay later</button>
-        </div>
-
-        {payNow ? (
-          <div className="payment-row">
-            {PAYMENT_METHOD_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value} type="button"
-                className={`payment-btn ${paymentMethod === value ? "selected" : ""}`}
-                onClick={() => onSelectPayment(value)} aria-pressed={paymentMethod === value}
-              >{label}</button>
-            ))}
-          </div>
-        ) : (
-          <p className="order-hint">
-            Saved as <strong>Unpaid</strong>. Settle it from the Tables page when the customer pays.
-          </p>
+      <div className="order-panel-footer"></div>
+      <div className="order-summary">
+        {hasPwdDiscount && (
+          <>
+            <div className="order-summary-row"><span>Subtotal (VAT incl.)</span><span>{formatPeso(totals.subtotal)}</span></div>
+            <div className="order-summary-row"><span>Less VAT exemption</span><span>−{formatPeso(totals.vatExemption)}</span></div>
+            <div className="order-summary-row"><span>Less PWD discount (20%)</span><span>−{formatPeso(totals.pwdDiscount)}</span></div>
+          </>
         )}
-
-        {blockers.length > 0 && (
-          <p className="order-hint order-hint--warn" role="status">{blockers.join(" · ")}</p>
-        )}
-
-        <div className="order-actions">
-          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={lines.length === 0 || isPlacing}>
-            Cancel Order
-          </button>
-          <button type="button" className="btn btn-navy" onClick={onPlaceOrder} disabled={!canPlaceOrder}>
-            {isPlacing
-              ? "Placing…"
-              : payNow
-                ? `Place order · ${formatPeso(totals.total)}`
-                : "Place order · Pay later"}
-          </button>
+        <div className="order-summary-row order-summary-total">
+          <span>Total ({itemCount} {itemCount === 1 ? "item" : "items"})</span>
+          <span>{formatPeso(totals.total)}</span>
         </div>
+        {totals.vatAmount > 0 && <div className="order-summary-row"><span>VAT 12% included</span><span>{formatPeso(totals.vatAmount)}</span></div>}
+      </div>
+
+      <div className="pay-timing" role="radiogroup" aria-label="When will the customer pay?">
+        <button type="button" role="radio" aria-checked={payNow} className={`payment-btn ${payNow ? "selected" : ""}`} onClick={() => onPayTimingChange("now")}>Pay now</button>
+        <button type="button" role="radio" aria-checked={!payNow} className={`payment-btn ${!payNow ? "selected" : ""}`} onClick={() => onPayTimingChange("later")}>Pay later</button>
+      </div>
+      {!payNow && <p className="pay-hint">The bill stays unpaid. Settle it from the Tables or Orders screen after the meal.</p>}
+
+      <div className="order-actions">
+        <button type="button" className="btn btn-navy" onClick={onSubmit} disabled={lines.length === 0 || isPlacing}>
+          {isPlacing ? "Placing…" : payNow ? `Charge ${formatPeso(totals.total)}` : "Place order · pay later"}
+        </button>
+        <button type="button" className="btn btn-outline" onClick={onCancel} disabled={lines.length === 0 || isPlacing}>Cancel Order</button>
+      </div>
       </div>
     </aside>
   );
