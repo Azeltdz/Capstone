@@ -25,6 +25,10 @@
   --radius-sm: 0.5rem;
   --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
   --topbar-h: 4rem;
+  --tt-free-bg: #ffffff;   --tt-free-border: #d5dbe5;
+  --tt-unpaid-bg: #fff4d6; --tt-unpaid-border: #e8a900; --tt-unpaid-ink: #7a5200;
+  --tt-paid-bg: #e4f6e9;   --tt-paid-border: #2e9e55;   --tt-paid-ink: #14612f;
+  --tt-busy-bg: #eaeef6;   --tt-busy-border: #8a98b5;   --tt-busy-ink: #3a4763;
 }
 
 body {
@@ -1192,6 +1196,50 @@ td.align-right {
 .type-select:focus {
   outline: none;
   border-color: #888;
+}
+
+.date-select {
+  width: 170px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #262626;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  color-scheme: light;
+}
+
+.date-select:hover:not(:disabled) {
+  border-color: #b3b3b3;
+}
+
+.date-select:focus-visible {
+  outline: none;
+  border-color: #888;
+  box-shadow: 0 0 0 3px rgb(0 0 0 / 5%);
+}
+
+.date-select:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+  border-color: #e5e5e5;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.date-select::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.date-select:hover:not(:disabled)::-webkit-calendar-picker-indicator {
+  opacity: 1;
 }
 
 
@@ -2401,19 +2449,6 @@ td.align-right {
 }
 
 /* View button (bottom of each order card) */
-.order-card-view {
-  width: 100%;
-  margin-top: 12px;
-  height: 38px;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.order-card-view:hover { background: #f5f5f5; }
-.order-card-view:focus-visible,
 .modal-close:focus-visible,
 .modal-done:focus-visible { outline: 2px solid #333; outline-offset: 2px; }
 
@@ -2635,26 +2670,6 @@ td.align-right {
   box-shadow: 0 0.0625rem 0.1875rem rgba(0, 0, 0, 0.1);
 }
 
-.order-card-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-}
-
-.order-card {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.125rem;
-}
-
-.order-card-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.625rem;
-  margin-bottom: 0.875rem;
-}
-
 .order-card-avatar {
   width: 2.25rem;
   height: 2.25rem;
@@ -2704,26 +2719,6 @@ td.align-right {
   font-size: 0.75rem;
   color: var(--text-secondary);
   white-space: nowrap;
-}
-
-.order-card-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
-  margin-bottom: 0.875rem;
-}
-
-.order-card-divider {
-  border-top: 1px solid var(--border);
-  margin-bottom: 0.75rem;
-}
-
-.order-card-total {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9375rem;
-  font-weight: 700;
 }
 
 /* ----- Pagination (only used if the Orders view still has paging) ----- */
@@ -2944,10 +2939,32 @@ td.align-right {
   }
 }
 
+/* POS menu: the item list scrolls on its own; the cart stays in view */
+@media (min-width: 62rem) {
+  .pos-layout:not(.pos-layout--single) {
+    height: calc(100dvh - var(--topbar-h) - 3.5rem);
+    align-items: stretch;
+  }
+  .pos-layout:not(.pos-layout--single) > :first-child {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: .25rem;
+  }
+  .pos-layout:not(.pos-layout--single) > .order-panel {
+    position: static;
+    height: 100%;
+    max-height: none;
+  }
+}
+
 /* ===== Responsive: Cashier (must stay AFTER the base rules above) ===== */
 @media (max-width: 62rem) {
-  .pos-layout {
-    grid-template-columns: 1fr;
+  .pos-layout { grid-template-columns: minmax(0, 1fr) 22rem; }
+  .pos-layout--single { grid-template-columns: 1fr; }
+  .order-panel { 
+    top: calc(var(--topbar-h) + 1rem); 
+    max-height: calc(100vh - var(--topbar-h) - 2rem); 
   }
 
   .order-panel {
@@ -2957,16 +2974,17 @@ td.align-right {
   }
 }
 
-@media (max-width: 56rem) {
-  .order-card-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
 @media (max-width: 48rem) {
   .order-type-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+  .orders-table thead{display:none}
+  .orders-table,.orders-table tbody,.orders-table tr,.orders-table td{display:block;width:100%}
+  .orders-table tr{padding:.6rem .9rem;border-bottom:1px solid #e5e7eb}
+  .orders-table td{border:0;padding:.25rem 0;display:flex;justify-content:space-between;gap:1rem;text-align:right}
+  .orders-table td::before{content:attr(data-label);color:#64748b;font-size:.75rem;text-transform:uppercase;text-align:left}
+  .orders-table td.actions{justify-content:flex-end}
+  .orders-table td.actions::before{content:none}
 }
 
 @media (max-width: 40rem) {
@@ -2975,8 +2993,7 @@ td.align-right {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .item-grid,
-  .order-card-grid {
+  .item-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3001,6 +3018,10 @@ td.align-right {
     flex-direction: column; 
     align-items: flex-start; 
   }
+
+  .start-quick { 
+    grid-template-columns: 1fr; 
+  } 
 }
 
 @media (max-width: 32rem) {
@@ -3009,14 +3030,18 @@ td.align-right {
   }
 }
 
-/* ===== Cashier POS v2: append to the END of src/index.css ===== */
-:root {
-  --tt-free-bg: #ffffff;   --tt-free-border: #d5dbe5;
-  --tt-unpaid-bg: #fff4d6; --tt-unpaid-border: #e8a900; --tt-unpaid-ink: #7a5200;
-  --tt-paid-bg: #e4f6e9;   --tt-paid-border: #2e9e55;   --tt-paid-ink: #14612f;
-  --tt-busy-bg: #eaeef6;   --tt-busy-border: #8a98b5;   --tt-busy-ink: #3a4763;
+
+@media (prefers-reduced-motion: reduce) {
+  .date-select {
+    transition: none;
+  }
+
+  .date-select::-webkit-calendar-picker-indicator {
+    transition: none;
+  }
 }
 
+/* ===== Cashier POS v2 ===== */
 .pos-layout--single { grid-template-columns: 1fr; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .optional { font-weight: 400; color: var(--text-muted); }
@@ -3128,10 +3153,18 @@ td.align-right {
 .placed-figures .placed-change { background: var(--tt-paid-bg); color: var(--tt-paid-ink); font-size: 1.25rem; }
 .table-modal-actions { flex-wrap: wrap; }
 .receipt-item-note { display: block; font-size: .75rem; color: var(--text-muted); font-style: italic; }
-/* The cart panel sticks below the sticky top bar, and gets a little wider for notes / PWD fields */
-@media (min-width: 62rem) {
-  .pos-layout { grid-template-columns: minmax(0, 1fr) 22rem; }
-  .pos-layout--single { grid-template-columns: 1fr; }
-  .order-panel { top: calc(var(--topbar-h) + 1rem); max-height: calc(100vh - var(--topbar-h) - 2rem); }
-}
-@media (max-width: 40rem) { .start-quick { grid-template-columns: 1fr; } }
+
+/* ---- Cashier Orders: table list ---- */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.orders-table-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:.75rem;overflow-x:auto}
+.orders-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.orders-table th{position:sticky;top:0;background:#f8fafc;text-align:left;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#64748b;padding:.7rem .9rem;border-bottom:1px solid #e5e7eb;white-space:nowrap}
+.orders-table td{padding:.7rem .9rem;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.orders-table tbody tr:last-child td{border-bottom:0}
+.orders-table tbody tr:hover{background:#f8fafc}
+.orders-table tr.row-unpaid{box-shadow:inset 3px 0 0 #f59e0b}
+.orders-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+.orders-table .mono{font-variant-numeric:tabular-nums;white-space:nowrap}
+.orders-table .actions{text-align:right;width:1%;white-space:nowrap}
+.orders-table .cell-main{display:block;font-weight:600}
+.orders-table .cell-sub{display:block;font-size:.78rem;color:#64748b;margin-top:.1rem}

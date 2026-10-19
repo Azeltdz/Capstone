@@ -9,6 +9,7 @@ import { useDebounce } from "../../hooks/useDebounce";
 import PrintReceiptButton from "../../components/receipt/PrintReceiptButton";
 import { manilaToday, paymentLabel } from "../../utils/format";
 import { PAYMENT_METHOD_OPTIONS } from "../../utils/orderStatus";
+import Pagination from "../../components/Pagination";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
@@ -234,6 +235,21 @@ function OrderDetailsModal({ orderId, onClose }) {
   );
 }
 
+function matchesSearch(order, term) {
+  const q = term.trim().toLowerCase();
+  if (!q) return true;
+  const id = String(order.transaction_id);
+  const idLabel = `#txn-${id.padStart(4, "0")}`;
+  const haystack = [
+    order.customer_name,
+    order.table_number ? `table ${order.table_number}` : "",
+    typeLabel(order.order_type),
+    idLabel,
+    id,
+  ].join(" ").toLowerCase();
+  return haystack.includes(q.replace(/^#/, "")) || haystack.includes(q);
+}
+
 export default function OrdersView() {
   const [activeType, setActiveType] = useState("all");
   const [activePayment, setActivePayment] = useState("all");
@@ -245,15 +261,34 @@ export default function OrdersView() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const closeModal = useCallback(() => setSelectedOrderId(null), []);
 
+    const searching = search.trim().length > 0;
+
   const { data: orders, isLoading, error } = useOrders({
     order_type: activeType === "all" ? undefined : activeType,
     payment_status: activeStatus === "all" ? undefined : activeStatus,
-    date: activeStatus === "unpaid" ? undefined : date,
+    date: activeStatus === "unpaid" || searching ? undefined : date,
   });
+
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
-    return orders.filter((o) => activePayment === "all" || o.payment_method === activePayment);
-  }, [orders, activePayment]);
+    return orders.filter(
+      (o) =>
+        (activePayment === "all" || o.payment_method === activePayment) &&
+        matchesSearch(o, search)
+    );
+  }, [orders, activePayment, search]);
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => { setPage(1); }, [activeType, activePayment, activeStatus, date, search, pageSize]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const pageOrders = useMemo(
+    () => filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filteredOrders, safePage, pageSize]
+  );
 
   return (
     <>
@@ -299,42 +334,64 @@ export default function OrdersView() {
       )}
 
       {!isLoading && !error && filteredOrders.length > 0 && (
-        <div className="order-card-grid">
-          {filteredOrders.map((order) => (
-            <div className="order-card" key={order.transaction_id}>
-              <div className="order-card-top">
-                <span className="order-card-avatar">
-                  {order.customer_name ? initialsFor(order.customer_name) : "—"}
-                </span>
-                <div className="order-card-identity">
-                  <span className="order-card-customer">{order.customer_name || "No customer name"}</span>
-                  <span className="order-card-label">{orderLabelFor(order)}</span>
-                </div>
-                <div className="order-card-status">
-                  <span className={`badge ${badgeClassForType(order.order_type)}`}>{typeLabel(order.order_type)}</span>
-                  <StatusBadge kind="payment" value={order.payment_status} />
-                  <span className="order-card-subtext">{order.payment_method ? paymentLabel(order.payment_method) : "Pay later"}</span>
-                </div>
-              </div>
-
-              <div className="order-card-meta">
-                <span>{format(new Date(order.transaction_at), "MMM d, yyyy h:mm a")}</span>
-                <span>#TXN-{String(order.transaction_id).padStart(4, "0")}</span>
-              </div>
-
-              <div className="order-card-divider" />
-
-              <div className="order-card-total">
-                <span>Total</span>
-                <span>{formatPeso(order.total_amount)}</span>
-              </div>
-
-              <button className="order-card-view" onClick={() => setSelectedOrderId(order.transaction_id)}>
-                View
-              </button>
-            </div>
-          ))}
+        <>
+        <div className="orders-table-wrap">
+          <table className="orders-table">
+            <thead>
+              <tr>
+                <th scope="col">Order #</th>
+                <th scope="col">Date &amp; time</th>
+                <th scope="col">Customer</th>
+                <th scope="col">Type</th>
+                <th scope="col">Payment</th>
+                <th scope="col" className="num">Total</th>
+                <th scope="col"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageOrders.map((order) => (
+                <tr
+                  key={order.transaction_id}
+                  className={order.payment_status === "unpaid" ? "row-unpaid" : undefined}
+                >
+                  <td data-label="Order #" className="mono">#TXN-{String(order.transaction_id).padStart(4, "0")}</td>
+                  <td data-label="Date & time">{format(new Date(order.transaction_at), "MMM d, yyyy h:mm a")}</td>
+                  <td data-label="Customer">
+                    <span className="cell-main">{order.customer_name || "No customer name"}</span>
+                    <span className="cell-sub">{orderLabelFor(order)}</span>
+                  </td>
+                  <td data-label="Type">
+                    <span className={`badge ${badgeClassForType(order.order_type)}`}>{typeLabel(order.order_type)}</span>
+                  </td>
+                  <td data-label="Payment">
+                    <StatusBadge kind="payment" value={order.payment_status} />
+                    <span className="cell-sub">{order.payment_method ? paymentLabel(order.payment_method) : "Pay later"}</span>
+                  </td>
+                  <td data-label="Total" className="num">{formatPeso(order.total_amount)}</td>
+                  <td className="actions">
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setSelectedOrderId(order.transaction_id)}
+                      aria-label={`View order ${order.transaction_id}`}
+                    >
+                      {order.payment_status === "unpaid" ? "Settle" : "View"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        <Pagination
+            page={safePage}
+            pageCount={pageCount}
+            total={filteredOrders.length}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={setPageSize}
+        />
+        </>
       )}
 
       {selectedOrderId && <OrderDetailsModal orderId={selectedOrderId} onClose={closeModal} />}

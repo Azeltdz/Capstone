@@ -46,6 +46,7 @@ async function getBranchesWithStats() {
       COALESCE((
         SELECT SUM(t.total_amount) FROM transactions t
         WHERE t.branch_id = b.branch_id
+        AND t.status = 'paid'
           AND DATE(t.transaction_at AT TIME ZONE 'Asia/Manila') = (NOW() AT TIME ZONE 'Asia/Manila')::date
       ), 0) AS sales_today
     FROM branches b
