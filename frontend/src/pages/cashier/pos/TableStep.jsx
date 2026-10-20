@@ -12,7 +12,7 @@ export default function TableStep({ onSelectTable, onSelectNoTable }) {
   return (
     <div className="pos-main">
       <h2 className="step-label">Step 1 — Table or no table</h2>
-      <p className="step-sub">Tap a free table for dine-in, or choose take-out or delivery if there's no table.</p>
+      <p className="step-sub">Tap a free table for Dine-in, or choose Take-out or Delivery if there's no table.</p>
 
       <div className="start-quick" role="group" aria-label="Orders without a table">
         <button type="button" className="start-quick-btn" onClick={() => onSelectNoTable("take-out")}>
@@ -25,7 +25,7 @@ export default function TableStep({ onSelectTable, onSelectNoTable }) {
         </button>
       </div>
 
-      <div className="start-divider"><span>or pick a table for dine-in</span></div>
+      <div className="start-divider"><span>Or Pick a Table for Dine-in</span></div>
 
       <TableLegend />
 

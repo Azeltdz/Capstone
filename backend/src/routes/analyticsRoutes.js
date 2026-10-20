@@ -8,6 +8,7 @@ router.use(protect, requireRole('owner'));
 
 router.get('/trends', c.getTrends);
 router.get('/procurement', c.getProcurement);
+router.get('/allocation', c.getAllocation);
 router.post('/forecasts/refresh', c.refreshForecasts);
 router.get('/branch-anomalies', c.getBranchAnomalies);
 router.get('/food-costing', c.getFoodCosting);

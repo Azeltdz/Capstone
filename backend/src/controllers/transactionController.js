@@ -10,20 +10,29 @@ const PERIODS = {
   '365d': { days: 365, granularity: 'month' },
 };
 
+const peso = (v) => (v === null || v === undefined ? null : Number(v).toFixed(2));
+
+const ORDER_TYPES = new Set(['dine-in', 'take-out', 'delivery']);
+const clampInt = (v, fallback, min, max) => {
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+
 function parseFilters(q) {
   const period = PERIODS[q.period] ? q.period : 'today';
   const { days, granularity } = PERIODS[period];
   const to = manilaToday();
+  const branchId = Number(q.branchId);
   return {
     period, granularity, to,
     from: shiftDate(to, -(days - 1)),
-    branchId: q.branchId ? Number(q.branchId) : null,
-    orderType: q.orderType || null,
-    search: (q.search || '').trim(),
+    branchId: Number.isInteger(branchId) && branchId > 0 ? branchId : null,
+    orderType: ORDER_TYPES.has(q.orderType) ? q.orderType : null,
+    search: (q.search || '').trim().slice(0, 100),
     sort: q.sort === 'total' ? 'total' : 'time',
     dir: q.dir === 'asc' ? 'asc' : 'desc',
-    page: q.page ? Number(q.page) : 1,
-    pageSize: q.pageSize ? Number(q.pageSize) : 25,
+    page: clampInt(q.page, 1, 1, 100000),
+    pageSize: clampInt(q.pageSize, 25, 1, 100),
   };
 }
 
@@ -92,7 +101,8 @@ async function exportCsv(req, res, next) {
 
     const rows = await model.fetchRows(f, model.EXPORT_LIMIT, 0);
     const csv = toCsv(
-      ['Order #', 'Date', 'Time', 'Branch', 'Cashier', 'Customer', 'Order type', 'Table', 'Guests', 'Payment', 'Total (PHP)'],
+      ['Order #', 'Date', 'Time', 'Branch', 'Cashier', 'Customer', 'Order type', 'Table', 'Guests', 'Payment', 'Total (PHP)',
+      'VATable sales', 'VAT 12%', 'VAT-exempt sales', 'PWD discount'],
       rows.map((r) => {
         const at = new Date(r.transaction_at);
         return [
@@ -101,6 +111,7 @@ async function exportCsv(req, res, next) {
           at.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
           r.branch_name, r.cashier_name, r.customer_name, r.order_type,
           r.table_number, r.guest_count, r.payment_method, r.total_amount.toFixed(2),
+          peso(r.vatable_sales), peso(r.vat_amount), peso(r.vat_exempt_sales), peso(r.pwd_discount),
         ];
       })
     );

@@ -216,15 +216,28 @@ async function getLatestForecasts() {
   `);
   return rows.map((r) => ({ ...r, reorder_qty: Number(r.reorder_qty) || 0 }));
 }
+
+async function getUnpaidReceivables() {
+  const { rows } = await pool.query(`
+    SELECT t.branch_id, COUNT(*) AS bills, COALESCE(SUM(t.total_amount), 0) AS amount
+    FROM transactions t
+    JOIN branches b ON b.branch_id = t.branch_id AND b.is_active = true
+    WHERE t.status = 'unpaid'
+    GROUP BY t.branch_id
+  `);
+  return rows.map((r) => ({ branch_id: r.branch_id, bills: Number(r.bills), amount: Number(r.amount) }));
+}
+
 async function getDashboardData(windowDays) {
-  const [branches, pace, topItems, lowStock, forecasts] = await Promise.all([
+  const [branches, pace, topItems, lowStock, forecasts, unpaid] = await Promise.all([
     getBranchDashboardStats(),
     getBranchPaceStats(windowDays),
     getTopItemsToday(),
     getLowStockActiveBranches(),
     getLatestForecasts(),
+    getUnpaidReceivables(),
   ]);
-  return { branches, pace, topItems, lowStock, forecasts };
+  return { branches, pace, topItems, lowStock, forecasts, unpaid };
 }
 
 module.exports = {

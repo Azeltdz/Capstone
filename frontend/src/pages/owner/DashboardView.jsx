@@ -2,10 +2,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Title } from "chart.js";
-import { BarChart3, Trophy, Lightbulb, Clock, RefreshCw, X } from "lucide-react";
+import { BarChart3, Trophy, Lightbulb, Clock, RefreshCw, X, TrendingDown} from "lucide-react";
 import { format } from "date-fns";
 import StatCard from "../../components/StatCard";
-import { useDashboard } from "../../hooks/useAnalytics";
+import { useDashboard, useTrends } from "../../hooks/useAnalytics";
 import { formatPeso, formatPesoWhole } from "../../utils/format";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Title);
@@ -111,6 +111,7 @@ export default function DashboardView() {
   // If the selected branch disappears (e.g. deactivated), quietly fall back to "all".
   const activeId = branches.some((b) => b.branch_id === selectedId) ? selectedId : null;
   const selectedBranch = branches.find((b) => b.branch_id === activeId) ?? null;
+  const trends = useTrends(activeId);
 
   const toggleBranch = useCallback(
     (id) => setSelectedId((prev) => (prev === id ? null : id)),
@@ -153,6 +154,27 @@ export default function DashboardView() {
     }
     return [...byItem.values()].sort((a, b) => b.sold - a.sold).slice(0, MAX_TOP_ITEMS);
   }, [data, visibleIds]);
+
+  // Unpaid (pay-later) bills still to collect. They are not counted as sales.
+  const unpaid = useMemo(
+    () =>
+      (data?.unpaid ?? [])
+        .filter((u) => visibleIds.has(u.branch_id))
+        .reduce((t, u) => ({ bills: t.bills + u.bills, amount: t.amount + u.amount }), { bills: 0, amount: 0 }),
+    [data, visibleIds]
+  );
+
+  // Best and least-selling items over the analytics window (items with no sales count as zero).
+  const { bestItems, leastItems, windowDays } = useMemo(() => {
+    const items = trends.data?.items ?? [];
+    const unsold = (trends.data?.unsold_items ?? []).map((i) => ({ ...i, moving_average: 0 }));
+    const ranked = [...items].sort((a, b) => b.moving_average - a.moving_average);
+    return {
+      bestItems: ranked.slice(0, 5),
+      leastItems: [...unsold, ...[...ranked].reverse()].slice(0, 5),
+      windowDays: trends.data?.scope?.window_days ?? 7,
+    };
+  }, [trends.data]);
 
   // Branch pace anomalies first, then reorder advice, then "demand falling" notes.
   const notices = useMemo(() => {
@@ -331,6 +353,12 @@ export default function DashboardView() {
           changeType={flagCount ? "warn" : "up"}
           valueClassName="accent-purple"
         />
+        <StatCard
+          label="Unpaid Bills"
+          value={formatPeso(unpaid.amount)}
+          change={unpaid.bills ? `${unpaid.bills} open · not counted as sales` : "No open bills"}
+          changeType={unpaid.bills ? "warn" : "up"}
+        />
       </div>
 
       <div className="dash-grid">
@@ -397,6 +425,40 @@ export default function DashboardView() {
               <span>
                 <strong>{topSeller.name}</strong> is today's best seller — {topSeller.sold} sold
               </span>
+            </div>
+          )}
+        </div>
+
+        <div className="panel panel-modern panel-accent-orange">
+          <h3 className="panel-title panel-title-icon">
+            <TrendingDown size={18} color={COLORS.orange} />
+            Best &amp; Least-Selling Items
+          </h3>
+          <p className="panel-sub">Average servings per day, last {windowDays} days</p>
+          {trends.isLoading ? (
+            <p className="panel-sub">Loading…</p>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(12rem, 1fr))", gap: "1rem" }}>
+              <div>
+                <strong style={{ color: COLORS.green }}>Best</strong>
+                <ul className="ai-list">
+                  {bestItems.length === 0 && <li>No sales in this period yet.</li>}
+                  {bestItems.map((i) => (
+                    <li key={`best-${i.item_id}`}>{i.item_name} — {i.moving_average}/day</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <strong style={{ color: COLORS.orange }}>Least</strong>
+                <ul className="ai-list">
+                  {leastItems.length === 0 && <li>No sales in this period yet.</li>}
+                  {leastItems.map((i) => (
+                    <li key={`least-${i.item_id}`}>
+                      {i.item_name} — {i.moving_average === 0 ? "no sales" : `${i.moving_average}/day`}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </div>

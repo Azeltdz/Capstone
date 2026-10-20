@@ -4,10 +4,10 @@ import { Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend,
 } from "chart.js";
-import { TrendingUp, TrendingDown, Minus, Package, AlertTriangle, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Package, AlertTriangle, X, ArrowRightLeft, Boxes } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useBranches } from "../../hooks/useBranches";
-import { useTrends, useProcurement, useBranchAnomalies, useRefreshForecasts } from "../../hooks/useAnalytics";
+import { useTrends, useProcurement, useBranchAnomalies, useRefreshForecasts, useAllocation } from "../../hooks/useAnalytics";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend);
 
@@ -32,6 +32,13 @@ function TrendBadge({ trend }) {
   );
 }
 
+const STOCK_BADGE = {
+  low: { label: "Low", className: "badge-flag" },
+  ok: { label: "OK", className: "badge-good" },
+  surplus: { label: "Surplus", className: "badge-card" },
+  idle: { label: "Not used", className: "badge-muted" },
+};
+
 const dayLabel = (iso) => format(parseISO(iso), "EEE d");
 const formatPct = (n) => `${n > 0 ? "+" : ""}${Math.round(n)}%`;
 
@@ -49,6 +56,7 @@ export default function AIAnalyticsView() {
   const trends = useTrends(scope);
   const procurement = useProcurement(scope);
   const anomalies = useBranchAnomalies();
+  const allocation = useAllocation();
   const { mutate: refreshForecasts } = useRefreshForecasts();
 
   // Save today's forecast snapshot (one row per branch/item/day, so revisits don't pile up rows).
@@ -137,6 +145,11 @@ export default function AIAnalyticsView() {
 
   const flagged = (anomalies.data?.branches ?? []).filter((b) => b.flagged);
   const procurementItems = procurement.data?.items ?? [];
+
+  const transfers = (allocation.data?.transfers ?? []).filter(
+    (t) => scope == null || t.from_branch_id === scope || t.to_branch_id === scope
+  );
+  const usageRows = (allocation.data?.usage ?? []).filter((u) => scope == null || u.branch_id === scope);
 
   return (
     <>
@@ -350,6 +363,42 @@ export default function AIAnalyticsView() {
             )}
           </div>
 
+          <div className="panel panel-ai" style={{ opacity: allocation.isFetching && !allocation.isLoading ? 0.6 : 1 }}>
+            <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <ArrowRightLeft size={18} /> Stock Transfers Between Branches
+            </h3>
+            {allocation.data && (
+              <p className="panel-sub">
+                Move surplus stock before ordering more. A branch always keeps {allocation.data.horizon_days} days of its own demand.
+              </p>
+            )}
+            {allocation.isLoading && <p className="loading-text">Checking stock…</p>}
+            {allocation.error && !allocation.data && (
+              <p className="error-text">Couldn't load transfer suggestions. {allocation.error.message}</p>
+            )}
+            {allocation.data && transfers.length === 0 && (
+              <p className="loading-text">No transfers suggested. No branch has spare stock for another branch's shortage.</p>
+            )}
+            {transfers.length > 0 && (
+              <ul className="procurement-list">
+                {transfers.map((t) => (
+                  <li key={`${t.ingredient_id}-${t.from_branch_id}-${t.to_branch_id}`}>
+                    <span>
+                      {t.ingredient_name}
+                      <small className="modal-muted" style={{ display: "block" }}>{t.reason}</small>
+                    </span>
+                    <strong>
+                      Send {t.quantity} {t.unit}
+                      <small className="modal-muted" style={{ display: "block" }}>
+                        {t.from_branch_name} → {t.to_branch_name}
+                      </small>
+                    </strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <div className={`panel ${flagged.length ? "panel-danger" : ""}`}>
             <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <AlertTriangle size={18} /> Branch Flag
@@ -382,6 +431,51 @@ export default function AIAnalyticsView() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: "1rem" }}>
+        <h3 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Boxes size={18} /> Ingredient Usage &amp; Stock Status ({scopeName})
+        </h3>
+        <p className="panel-sub">
+          Daily usage comes from recent sales and each menu item's recipe. Days of cover = stock on hand ÷ daily usage.
+        </p>
+        {allocation.isLoading && <p className="loading-text">Loading…</p>}
+        {allocation.data && usageRows.length === 0 && <p className="loading-text">No inventory records yet.</p>}
+        {usageRows.length > 0 && (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Ingredient</th>
+                  {scope == null && <th>Branch</th>}
+                  <th>On hand</th>
+                  <th>Used / day</th>
+                  <th>Days of cover</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usageRows.slice(0, 20).map((u) => {
+                  const badge = STOCK_BADGE[u.status] ?? STOCK_BADGE.ok;
+                  return (
+                    <tr key={`${u.branch_id}-${u.ingredient_id}`}>
+                      <td>{u.ingredient_name}</td>
+                      {scope == null && <td>{u.branch_name}</td>}
+                      <td>{u.on_hand} {u.unit}</td>
+                      <td>{u.daily_usage} {u.unit}</td>
+                      <td>{u.days_of_cover ?? "—"}</td>
+                      <td><span className={`badge ${badge.className}`}>{badge.label}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {usageRows.length > 20 && (
+          <p className="panel-sub">Showing the 20 most urgent of {usageRows.length} ingredients. See Inventory for the full list.</p>
+        )}
       </div>
 
       {showAnomalies && anomalies.data && (

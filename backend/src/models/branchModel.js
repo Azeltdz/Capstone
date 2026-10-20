@@ -18,7 +18,7 @@ async function getBranchById(id) {
 async function createBranch({ branch_name, location, contact_number }) {
   const { rows } = await pool.query(
     `INSERT INTO branches (branch_name, location, contact_number)
-      VALUES ($1, $2, $3, $4)
+      VALUES ($1, $2, $3)
       RETURNING *`,
     [branch_name, location, contact_number]
   );

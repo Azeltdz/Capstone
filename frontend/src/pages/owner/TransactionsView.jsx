@@ -166,6 +166,18 @@ export default function TransactionsView() {
             value={<PaymentLines payments={s.by_payment} />}
             valueClassName="stat-value-sm"
           />
+          <StatCard
+            label="VAT (12%)"
+            value={formatPeso(s.vat_amount ?? 0)}
+            change={`VATable ${formatPeso(s.vatable_sales ?? 0)} · PWD discounts ${formatPeso(s.pwd_discount ?? 0)}`}
+            changeType="muted"
+          />
+          <StatCard
+            label="Unpaid Bills"
+            value={formatPeso(s.unpaid_amount ?? 0)}
+            change={s.unpaid_count ? `${s.unpaid_count} open · not counted as sales` : "No open bills"}
+            changeType={s.unpaid_count ? "warn" : "up"}
+          />
         </div>
       )}
 

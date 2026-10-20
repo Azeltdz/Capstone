@@ -35,6 +35,12 @@ async function getProcurement(req, res, next) {
   } catch (err) { next(err); }
 }
 
+  async function getAllocation(req, res, next) {
+    try {
+      res.json(await analytics.getAllocation());
+    } catch (err) { next(err); }
+  }
+
 async function refreshForecasts(req, res, next) {
   try {
     res.json(await analytics.refreshForecasts());
@@ -120,6 +126,7 @@ async function getDashboard(req, res, next) {
       branches,
       top_items: raw.topItems,
       low_stock: raw.lowStock,
+      unpaid: raw.unpaid,
       recommendations,
       recommendations_as_of: recommendationsAsOf,
     });
@@ -127,5 +134,5 @@ async function getDashboard(req, res, next) {
 }
 
 module.exports = {
-  getTrends, getProcurement, refreshForecasts, getBranchAnomalies, getFoodCosting, getDashboard,
+  getTrends, getProcurement, refreshForecasts, getBranchAnomalies, getFoodCosting, getDashboard, getAllocation
 };

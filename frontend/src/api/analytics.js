@@ -8,3 +8,4 @@ export const getProcurement = (branchId) => apiFetch(`/api/analytics/procurement
 export const getBranchAnomalies = () => apiFetch("/api/analytics/branch-anomalies");
 export const refreshForecasts = () => apiFetch("/api/analytics/forecasts/refresh", { method: "POST" });
 export const getFoodCosting = () => apiFetch("/api/analytics/food-costing");
+export const getAllocation = () => apiFetch("/api/analytics/allocation");

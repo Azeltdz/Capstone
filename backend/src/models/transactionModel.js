@@ -19,10 +19,13 @@ function parseOrderSearch(text) {
   return digits;
 }
 
-function buildWhere(f, { branch = true, search = true } = {}) {
+const PAY_STATUS = new Set(['paid', 'unpaid']);
+
+function buildWhere(f, { branch = true, search = true, status = 'paid' } = {}) {
+  if (!PAY_STATUS.has(status)) throw new Error('invalid payment status');
   const values = [f.from, f.to];
   const conditions = [
-    `t.status = 'paid'`,
+    `t.status = '${status}'`,
     `t.transaction_at >= (($1::date)::timestamp AT TIME ZONE '${TZ}')`,
     `t.transaction_at < (($2::date + 1)::timestamp AT TIME ZONE '${TZ}')`,
   ];
@@ -69,14 +72,21 @@ async function fetchRows(f, limit, offset) {
   const { rows } = await pool.query(
     `SELECT t.transaction_id, t.branch_id, b.branch_name, u.full_name AS cashier_name,
             t.customer_name, t.guest_count, t.order_type, tb.table_number,
-            t.total_amount, t.payment_method, t.transaction_at
+            t.total_amount, t.payment_method, t.transaction_at,
+            t.subtotal_amount, t.vatable_sales, t.vat_amount, t.vat_exempt_sales, t.pwd_discount,
+            t.amount_tendered, t.status AS payment_status, t.order_status
       ${FROM_LIST}
       WHERE ${where}
       ORDER BY ${SORT_COLUMNS[f.sort]} ${dir}, t.transaction_id ${dir}
       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
     [...values, limit, offset]
   );
-  return rows.map((r) => ({ ...r, total_amount: money(r.total_amount) }));
+    return rows.map((r) => ({
+    ...r,
+    total_amount: money(r.total_amount),
+    vat_amount: r.vat_amount === null ? null : money(r.vat_amount),
+    pwd_discount: money(r.pwd_discount),
+  }));
 }
 
 async function listTransactions(f) {
@@ -102,7 +112,35 @@ async function getSummary(f) {
   const by_payment = rows.map((r) => ({ method: r.payment_method, count: Number(r.count), amount: money(r.amount) }));
   const count = by_payment.reduce((s, p) => s + p.count, 0);
   const total = money(by_payment.reduce((s, p) => s + p.amount, 0));
-  return { total_sales: total, count, avg_order_value: count ? money(total / count) : 0, by_payment };
+
+  const { rows: [tax] } = await pool.query(
+    `SELECT COALESCE(SUM(t.vatable_sales), 0) AS vatable_sales,
+            COALESCE(SUM(t.vat_amount), 0) AS vat_amount,
+            COALESCE(SUM(t.vat_exempt_sales), 0) AS vat_exempt_sales,
+            COALESCE(SUM(t.pwd_discount), 0) AS pwd_discount,
+            COUNT(*) FILTER (WHERE t.pwd_discount > 0) AS pwd_orders
+      FROM transactions t
+      JOIN users u ON u.user_id = t.cashier_id
+      WHERE ${where}`,
+    values
+  );
+
+  const open = buildWhere(f, { status: 'unpaid' });
+  const { rows: [unpaid] } = await pool.query(
+    `SELECT COUNT(*) AS count, COALESCE(SUM(t.total_amount), 0) AS amount
+      FROM transactions t
+      JOIN users u ON u.user_id = t.cashier_id
+      WHERE ${open.where}`,
+    open.values
+  );
+
+  return {
+    total_sales: total, count, avg_order_value: count ? money(total / count) : 0, by_payment,
+    vatable_sales: money(tax.vatable_sales), vat_amount: money(tax.vat_amount),
+    vat_exempt_sales: money(tax.vat_exempt_sales), pwd_discount: money(tax.pwd_discount),
+    pwd_orders: Number(tax.pwd_orders),
+    unpaid_count: Number(unpaid.count), unpaid_amount: money(unpaid.amount),
+  };
 }
 
 async function getTrendRows(f) {

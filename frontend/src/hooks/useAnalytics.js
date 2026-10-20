@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  getDashboard, getTrends, getProcurement, getBranchAnomalies, refreshForecasts,
+  getDashboard, getTrends, getProcurement, getBranchAnomalies, refreshForecasts, getAllocation,
 } from "../api/analytics";
 
 export function useDashboard() {
@@ -43,5 +43,13 @@ export function useRefreshForecasts() {
   return useMutation({
     mutationFn: refreshForecasts,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["analytics", "dashboard"] }),
+  });
+}
+
+export function useAllocation() {
+  return useQuery({
+    queryKey: ["analytics", "allocation"],
+    queryFn: getAllocation,
+    staleTime: 60 * 1000,
   });
 }

@@ -1632,10 +1632,10 @@ td.align-right {
 
 
 .step-label {
-  font-size: 0.8125rem;
+  font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--text-muted);
+  color: var(--navy);
   text-transform: uppercase;
   margin-bottom: 0.25rem;
 }
@@ -1647,19 +1647,36 @@ td.align-right {
 }
 
 .back-link {
-  display: inline-block;
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 1.5px solid var(--navy);
+  border-radius: 1rem;
   color: var(--navy);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  padding: 0;
+  padding: 0.5rem 1rem;
   margin-bottom: 0.75rem;
+  transition: all 0.3s ease;
 }
 
 .back-link:hover {
-  text-decoration: underline;
+  background: var(--navy);
+  color: var(--tt-free-bg);
+  transform: translateX(5px);
+  padding: 0.5rem 1.25rem;
+}
+
+.back-link:active {
+  transform: translateY(1px);
+}
+
+.back-link:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 3px;
 }
 
 .loading-text,

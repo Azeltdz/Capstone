@@ -5,6 +5,7 @@ const { getAllBranches } = require('../models/branchModel');
 const { getAllSystemSettings } = require('../models/settingsModel');
 const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
 const { classifyTrend, trendMessage, computeBranchProcurement } = require('../utils/forecastEngine');
+const { computeAllocation } = require('../utils/transfers');
 
 const TZ = 'Asia/Manila';
 
@@ -42,13 +43,11 @@ async function loadDemand(windowDays) {
   return { sales, firstDays, items, branches: branches.filter((b) => b.is_active), today: manilaToday() };
 }
 
-// branchId = one branch, or null for all active branches combined.
 function buildScopeTrends({ demand, branchId, windowDays, trendThreshold }) {
   const { sales, firstDays, items, branches, today } = demand;
   const ids = branchId ? [branchId] : branches.map((b) => b.branch_id);
   const idSet = new Set(ids);
 
-  // Complete days only, and never earlier than the scope's first sale.
   const first = ids.map((id) => firstDays.get(id)).filter(Boolean).sort()[0];
   const windowStart = shiftDate(today, -windowDays);
   const start = first && first > windowStart ? first : windowStart;
@@ -65,7 +64,7 @@ function buildScopeTrends({ demand, branchId, windowDays, trendThreshold }) {
   const rows = [];
   for (const item of items) {
     const perDay = byItem.get(item.item_id);
-    if (!perDay) continue; // no sales in the window
+    if (!perDay) continue;
     const series = days.map((date) => ({ date, quantity: perDay.get(date) ?? 0 }));
     const stats = classifyTrend(series.map((s) => s.quantity), trendThreshold);
     rows.push({
@@ -83,6 +82,10 @@ async function getTrends(branchId) {
   const settings = await getActiveSettings();
   const demand = await loadDemand(settings.windowDays);
   const { days, items } = buildScopeTrends({ demand, branchId, ...settings });
+  const sold = new Set(items.map((i) => i.item_id));
+  const unsoldItems = demand.items
+    .filter((i) => !sold.has(i.item_id))
+    .map((i) => ({ item_id: i.item_id, item_name: i.item_name, category: i.category }));
   return {
     scope: {
       branch_id: branchId ?? null,
@@ -93,6 +96,7 @@ async function getTrends(branchId) {
       period_end: days[days.length - 1] ?? null,
     },
     items,
+    unsold_items: unsoldItems,
   };
 }
 
@@ -140,7 +144,24 @@ async function getProcurement(branchId) {
   };
 }
 
-// Saves today's snapshot for every active branch. Safe to call repeatedly.
+async function getAllocation() {
+  const settings = await getActiveSettings();
+  const demand = await loadDemand(settings.windowDays);
+  const [bomRows, stockRows] = await Promise.all([getBomRows(), getStockRows(null)]);
+
+  const branchItemAverages = new Map();
+  for (const branch of demand.branches) {
+    const { items } = buildScopeTrends({ demand, branchId: branch.branch_id, ...settings });
+    branchItemAverages.set(branch.branch_id, new Map(items.map((i) => [i.item_id, i.moving_average])));
+  }
+
+  const horizonDays = settings.leadTimeDays + settings.safetyStockDays;
+  return {
+    horizon_days: horizonDays,
+    ...computeAllocation({ branches: demand.branches, branchItemAverages, bomRows, stockRows, horizonDays }),
+  };
+}
+
 async function refreshForecasts() {
   const settings = await getActiveSettings();
   const demand = await loadDemand(settings.windowDays);
@@ -179,4 +200,4 @@ async function refreshForecasts() {
   return { saved, forecast_date: demand.today };
 }
 
-module.exports = { getActiveSettings, getTrends, getProcurement, refreshForecasts };
+module.exports = { getActiveSettings, getTrends, getProcurement, getAllocation, refreshForecasts };

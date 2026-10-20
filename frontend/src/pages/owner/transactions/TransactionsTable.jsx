@@ -86,6 +86,7 @@ export default function TransactionsTable({
                     {ORDER_TYPE_LABELS[row.order_type] ?? row.order_type}
                   </span>
                   {row.table_number && <span className="modal-muted"> Table {row.table_number}</span>}
+                  {Number(row.pwd_discount) > 0 && <span className="badge badge-muted" style={{ marginLeft: 6 }}>PWD</span>}
                 </td>
                 <td className="align-right cell-strong">{formatPeso(row.total_amount)}</td>
                 <td>
