@@ -89,4 +89,22 @@ function computeAllocation({ branches, branchItemAverages, bomRows, stockRows, h
   };
 }
 
-module.exports = { computeAllocation };
+// "branch:ingredient" -> [{ from_branch_name, quantity }] for every suggested transfer into that branch.
+function incomingTransfers({ transfers }) {
+  const map = new Map();
+  for (const t of transfers) {
+    const key = `${t.to_branch_id}:${t.ingredient_id}`;
+    const list = map.get(key) ?? [];
+    list.push({ from_branch_name: t.from_branch_name, quantity: t.quantity });
+    map.set(key, list);
+  }
+  return map;
+}
+
+// How much of a reorder a transfer covers, and what is left to order from the supplier.
+function netOrder(reorderQty, moves) {
+  const transfer = round2(moves.reduce((sum, m) => sum + m.quantity, 0));
+  return { transfer_qty: transfer, order_qty: Math.max(0, round2(reorderQty - transfer)) };
+}
+
+module.exports = { computeAllocation, incomingTransfers, netOrder };

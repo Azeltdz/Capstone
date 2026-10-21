@@ -148,37 +148,43 @@ export default function TransactionsView() {
       </div>
 
       {summary.isLoading ? (
-        <div className="stat-grid stat-grid-4">
-          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton skeleton-stat-card" />)}
-        </div>
+        <section className="stat-section" aria-label="Transaction summary">
+          <div className="stat-grid-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="skeleton skeleton-stat-card" />
+            ))}
+          </div>
+        </section>
       ) : summary.error && !s ? (
         <p className="error-text">
           Couldn't load totals. {summary.error.message}{" "}
           <button type="button" className="btn-text" onClick={() => summary.refetch()}>Try again</button>
         </p>
       ) : (
-        <div className="stat-grid stat-grid-4">
-          <StatCard label="Total Sales" value={formatPeso(s.total_sales)} change={`${periodLabel} · ${branchLabel}`} changeType="muted" />
-          <StatCard label="Transactions" value={s.count} />
-          <StatCard label="Avg Order Value" value={formatPeso(s.avg_order_value)} />
-          <StatCard
-            label="Payments"
-            value={<PaymentLines payments={s.by_payment} />}
-            valueClassName="stat-value-sm"
-          />
-          <StatCard
-            label="VAT (12%)"
-            value={formatPeso(s.vat_amount ?? 0)}
-            change={`VATable ${formatPeso(s.vatable_sales ?? 0)} · PWD discounts ${formatPeso(s.pwd_discount ?? 0)}`}
-            changeType="muted"
-          />
-          <StatCard
-            label="Unpaid Bills"
-            value={formatPeso(s.unpaid_amount ?? 0)}
-            change={s.unpaid_count ? `${s.unpaid_count} open · not counted as sales` : "No open bills"}
-            changeType={s.unpaid_count ? "warn" : "up"}
-          />
-        </div>
+        <section className="stat-section" aria-label="Transaction summary">
+          <div className="stat-grid-6">
+            <StatCard label="Total Sales" value={formatPeso(s.total_sales)} change={`${periodLabel} · ${branchLabel}`} changeType="muted" />
+            <StatCard label="Transactions" value={s.count} />
+            <StatCard label="Avg Order Value" value={formatPeso(s.avg_order_value)} />
+            <StatCard
+              label="Payments"
+              value={<PaymentLines payments={s.by_payment} />}
+              valueClassName="stat-value-sm"
+            />
+            <StatCard
+              label="VAT (12%)"
+              value={formatPeso(s.vat_amount ?? 0)}
+              change={`VATable ${formatPeso(s.vatable_sales ?? 0)} · PWD discounts ${formatPeso(s.pwd_discount ?? 0)}`}
+              changeType="muted"
+            />
+            <StatCard
+              label="Unpaid Bills"
+              value={formatPeso(s.unpaid_amount ?? 0)}
+              change={s.unpaid_count ? `${s.unpaid_count} open · not counted as sales` : "No open bills"}
+              changeType={s.unpaid_count ? "warn" : "up"}
+            />
+          </div>
+        </section>
       )}
 
       <TrendChart

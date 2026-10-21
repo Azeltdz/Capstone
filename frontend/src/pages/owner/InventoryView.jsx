@@ -17,6 +17,7 @@ import { UNIT_OPTIONS } from "../../constants/units";
 import Pagination from "../../components/Pagination";
 
 const EMPTY_FORM = { branchId: "", name: "", unit: "", unitCost: "", onHand: "", reorder: "" };
+const MAX_VISIBLE_ALERTS = 3;
 
 export default function InventoryView() {
   const [searchInput, setSearchInput] = useState("");
@@ -157,15 +158,32 @@ export default function InventoryView() {
   const showBranchCol = branch === "all";
   const colCount = showBranchCol ? 9 : 8;
 
+  const previewLowStock = lowStock.slice(0, MAX_VISIBLE_ALERTS);
+  const hiddenLowStock = lowStock.length - previewLowStock.length;
+
   return (
     <>
       {lowStock.length > 0 && (
         <div className="alert-banner">
           ⚠ Low Stock Alert:{" "}
-          {lowStock
+          {previewLowStock
             .map((i) => (showBranchCol ? `${i.ingredient_name} (${i.branch_name})` : i.ingredient_name))
-            .join(", ")}{" "}
+            .join(", ")}
+          {hiddenLowStock > 0 && ` and ${hiddenLowStock.toLocaleString()} more`}{" "}
           {lowStock.length === 1 ? "is" : "are"} at or below reorder level
+          {hiddenLowStock > 0 && (
+            <button
+              type="button"
+              className="alert-toggle"
+              onClick={() => {
+                setStatus("Low");
+                setSearchInput("");
+                setPageState({ key: filterKey, page: 1 });
+              }}
+            >
+              View all {lowStock.length.toLocaleString()} →
+            </button>
+          )}
         </div>
       )}
 

@@ -18,6 +18,7 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const settingsRoutes = require('./src/routes/settingsRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const transactionRoutes = require('./src/routes/transactionRoutes');
+const transferRoutes = require('./src/routes/transferRoutes');
 
 const config = require('./src/config/config');
 const { notFound, errorHandler } = require('./src/middleware/errorHandler');
@@ -52,6 +53,7 @@ app.use('/api', inventoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api', settingsRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/transfers', transferRoutes);
 app.use('/api/transactions', transactionRoutes);
 
 // Error Handler

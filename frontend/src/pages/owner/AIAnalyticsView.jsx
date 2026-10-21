@@ -6,8 +6,10 @@ import {
 } from "chart.js";
 import { TrendingUp, TrendingDown, Minus, Package, AlertTriangle, X, ArrowRightLeft, Boxes } from "lucide-react";
 import { format, parseISO } from "date-fns";
+import toast from "react-hot-toast";
 import { useBranches } from "../../hooks/useBranches";
 import { useTrends, useProcurement, useBranchAnomalies, useRefreshForecasts, useAllocation } from "../../hooks/useAnalytics";
+import { useRecordTransfer, useTransferHistory } from "../../hooks/useTransfers";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend);
 
@@ -47,6 +49,7 @@ export default function AIAnalyticsView() {
   const [itemId, setItemId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [showAnomalies, setShowAnomalies] = useState(false);
+  const [confirmKey, setConfirmKey] = useState(null); // the transfer waiting for "Yes, move it"
 
   const scope = branchId === "all" ? null : Number(branchId);
 
@@ -57,6 +60,8 @@ export default function AIAnalyticsView() {
   const procurement = useProcurement(scope);
   const anomalies = useBranchAnomalies();
   const allocation = useAllocation();
+  const recordTransfer = useRecordTransfer();
+  const history = useTransferHistory();
   const { mutate: refreshForecasts } = useRefreshForecasts();
 
   // Save today's forecast snapshot (one row per branch/item/day, so revisits don't pile up rows).
@@ -76,6 +81,22 @@ export default function AIAnalyticsView() {
   const selected = items.find((i) => i.item_id === itemId) ?? items[0] ?? null;
   const scopeName =
     scope == null ? "All Branches" : activeBranches.find((b) => b.branch_id === scope)?.branch_name ?? "";
+
+  async function handleRecord(t) {
+    try {
+      await recordTransfer.mutateAsync({
+        ingredient_id: t.ingredient_id,
+        from_branch_id: t.from_branch_id,
+        to_branch_id: t.to_branch_id,
+        quantity: t.quantity,
+      });
+      toast.success(`Moved ${t.quantity} ${t.unit} of ${t.ingredient_name} to ${t.to_branch_name}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setConfirmKey(null);
+    }
+  }
 
   function changeBranch(value) {
     setBranchId(value);
@@ -356,7 +377,14 @@ export default function AIAnalyticsView() {
                         {p.used_by.length > 0 && ` · used by ${p.used_by.join(", ")}`}
                       </small>
                     </span>
-                    <strong>Order {p.reorder_qty} {p.unit}</strong>
+                    <strong>
+                      {p.order_qty > 0 ? `Order ${p.order_qty} ${p.unit}` : "Covered by transfer"}
+                      {p.transfer_qty > 0 && (
+                        <small className="modal-muted" style={{ display: "block" }}>
+                          {p.transfer_qty} {p.unit} to move from {p.transfer_from.join(", ")}
+                        </small>
+                      )}
+                    </strong>
                   </li>
                 ))}
               </ul>
@@ -392,10 +420,58 @@ export default function AIAnalyticsView() {
                       <small className="modal-muted" style={{ display: "block" }}>
                         {t.from_branch_name} → {t.to_branch_name}
                       </small>
+                      {confirmKey === `${t.ingredient_id}-${t.from_branch_id}-${t.to_branch_id}` ? (
+                        <span style={{ display: "block", marginTop: 4 }}>
+                          <button
+                            type="button"
+                            className="btn btn-navy btn-sm"
+                            disabled={recordTransfer.isPending}
+                            onClick={() => handleRecord(t)}
+                          >
+                            {recordTransfer.isPending ? "Saving…" : "Yes, move it"}
+                          </button>{" "}
+                          <button
+                            type="button"
+                            className="btn-outline btn-sm"
+                            disabled={recordTransfer.isPending}
+                            onClick={() => setConfirmKey(null)}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-outline btn-sm"
+                          style={{ marginTop: 4 }}
+                          onClick={() => setConfirmKey(`${t.ingredient_id}-${t.from_branch_id}-${t.to_branch_id}`)}
+                        >
+                          Record transfer
+                        </button>
+                      )}
                     </strong>
                   </li>
                 ))}
               </ul>
+            )}
+
+            {history.data?.length > 0 && (
+              <>
+                <h4 className="panel-sub" style={{ marginTop: "0.75rem" }}>Recent transfers</h4>
+                <ul className="procurement-list">
+                  {history.data.slice(0, 5).map((h) => (
+                    <li key={h.transfer_id}>
+                      <span>
+                        {h.ingredient_name}
+                        <small className="modal-muted" style={{ display: "block" }}>
+                          {h.from_branch_name} → {h.to_branch_name} · {format(new Date(h.created_at), "MMM d, h:mm a")}
+                        </small>
+                      </span>
+                      <strong>{h.quantity} {h.unit}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </div>
 

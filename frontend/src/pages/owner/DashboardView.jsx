@@ -71,11 +71,13 @@ function summarizeNames(names, max = 2) {
 function DashboardSkeleton() {
   return (
     <>
-      <div className="stat-grid">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="stat-card skeleton skeleton-stat-card" />
-        ))}
-      </div>
+      <section className="stat-section" aria-label="Dashboard summary">
+        <div className="stat-grid-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="stat-card skeleton skeleton-stat-card" />
+          ))}
+        </div>
+      </section>
       <div className="dash-grid">
         <div className="panel panel-modern">
           <div className="skeleton skeleton-line skeleton-title" />
@@ -329,7 +331,8 @@ export default function DashboardView() {
         </p>
       )}
 
-      <div className="stat-grid">
+    <section className="stat-section" aria-label="Dashboard summary">
+      <div className="stat-grid-5">
         <StatCard
           label="Today's Sales"
           value={formatPeso(totals.sales)}
@@ -360,6 +363,7 @@ export default function DashboardView() {
           changeType={unpaid.bills ? "warn" : "up"}
         />
       </div>
+    </section>
 
       <div className="dash-grid">
         <div className="panel panel-modern panel-accent-navy">

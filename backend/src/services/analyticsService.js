@@ -5,7 +5,7 @@ const { getAllBranches } = require('../models/branchModel');
 const { getAllSystemSettings } = require('../models/settingsModel');
 const { DEFAULT_SETTINGS } = require('../constants/settingsDefaults');
 const { classifyTrend, trendMessage, computeBranchProcurement } = require('../utils/forecastEngine');
-const { computeAllocation } = require('../utils/transfers');
+const { computeAllocation, incomingTransfers, netOrder } = require('../utils/transfers');
 
 const TZ = 'Asia/Manila';
 
@@ -118,12 +118,16 @@ async function getProcurement(branchId) {
   const demand = await loadDemand(settings.windowDays);
   const [bomRows, stockRows] = await Promise.all([getBomRows(), getStockRows(branchId)]);
   const nameById = new Map(demand.items.map((i) => [i.item_id, i.item_name]));
+  const incoming = incomingTransfers(await buildAllocation({ settings, demand, bomRows }));
 
   const list = [];
   for (const branch of demand.branches.filter((b) => !branchId || b.branch_id === branchId)) {
     const { rows } = procurementForBranch({ branch, demand, bomRows, stockRows, settings });
     for (const r of rows) {
+      const moves = incoming.get(`${branch.branch_id}:${r.ingredient_id}`) ?? [];
+      const { transfer_qty, order_qty } = netOrder(r.reorder_qty, moves);
       list.push({
+        transfer_qty, order_qty, transfer_from: [...new Set(moves.map((m) => m.from_branch_name))],
         branch_id: branch.branch_id, branch_name: branch.branch_name,
         ingredient_id: r.ingredient_id, ingredient_name: r.ingredient_name, unit: r.unit,
         on_hand: r.on_hand, daily_demand: r.daily_demand, reorder_qty: r.reorder_qty,
@@ -144,17 +148,14 @@ async function getProcurement(branchId) {
   };
 }
 
-async function getAllocation() {
-  const settings = await getActiveSettings();
-  const demand = await loadDemand(settings.windowDays);
-  const [bomRows, stockRows] = await Promise.all([getBomRows(), getStockRows(null)]);
-
+// Stock status per branch/ingredient plus suggested transfers between branches.
+async function buildAllocation({ settings, demand, bomRows }) {
+  const stockRows = await getStockRows(null);
   const branchItemAverages = new Map();
   for (const branch of demand.branches) {
     const { items } = buildScopeTrends({ demand, branchId: branch.branch_id, ...settings });
     branchItemAverages.set(branch.branch_id, new Map(items.map((i) => [i.item_id, i.moving_average])));
   }
-
   const horizonDays = settings.leadTimeDays + settings.safetyStockDays;
   return {
     horizon_days: horizonDays,
@@ -162,10 +163,18 @@ async function getAllocation() {
   };
 }
 
+async function getAllocation() {
+  const settings = await getActiveSettings();
+  const demand = await loadDemand(settings.windowDays);
+  const bomRows = await getBomRows();
+  return buildAllocation({ settings, demand, bomRows });
+}
+
 async function refreshForecasts() {
   const settings = await getActiveSettings();
   const demand = await loadDemand(settings.windowDays);
   const [bomRows, stockRows] = await Promise.all([getBomRows(), getStockRows(null)]);
+  const incoming = incomingTransfers(await buildAllocation({ settings, demand, bomRows }));
   let saved = 0;
 
   for (const branch of demand.branches) {
@@ -181,9 +190,19 @@ async function refreshForecasts() {
     for (const item of items) {
       if (item.trend === 'insufficient_data') continue;
       const reorder = reorderByItem.get(item.item_id);
-      const recommendation = reorder
-        ? `Reorder about ${reorder.reorder_qty} ${reorder.unit} of ${reorder.ingredient_name} to cover the next ${reorder.horizon_days} days. ${item.item_name}: ${item.recommendation}`
-        : `${item.item_name}: ${item.recommendation}`;
+      const moves = reorder ? incoming.get(`${branch.branch_id}:${reorder.ingredient_id}`) ?? [] : [];
+      const net = reorder ? netOrder(reorder.reorder_qty, moves) : null;
+      const from = [...new Set(moves.map((m) => m.from_branch_name))].join(' and ');
+      let recommendation;
+      if (!reorder) {
+        recommendation = `${item.item_name}: ${item.recommendation}`;
+      } else if (net.transfer_qty > 0 && net.order_qty > 0) {
+        recommendation = `Move ${net.transfer_qty} ${reorder.unit} of ${reorder.ingredient_name} from ${from} first, then order about ${net.order_qty} ${reorder.unit} to cover the next ${reorder.horizon_days} days. ${item.item_name}: ${item.recommendation}`;
+      } else if (net.transfer_qty > 0) {
+        recommendation = `Move ${net.transfer_qty} ${reorder.unit} of ${reorder.ingredient_name} from ${from} to cover the next ${reorder.horizon_days} days. No supplier order needed. ${item.item_name}: ${item.recommendation}`;
+      } else {
+        recommendation = `Reorder about ${reorder.reorder_qty} ${reorder.unit} of ${reorder.ingredient_name} to cover the next ${reorder.horizon_days} days. ${item.item_name}: ${item.recommendation}`;
+      }
 
       await upsertForecast({
         branch_id: branch.branch_id,

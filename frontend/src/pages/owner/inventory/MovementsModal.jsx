@@ -7,6 +7,7 @@ import { formatOrderNumber } from "../../../utils/format";
 const TYPES = {
   opening: ["Opening balance", "badge-cash"], sale: ["Sale", "badge-card"], restock: ["Delivery", "badge-good"],
   spoilage: ["Spoilage", "badge-flag"], adjustment: ["Stock count", "badge-warn"],
+  transfer_out: ["Transfer out", "badge-warn"], transfer_in: ["Transfer in", "badge-good"],
 };
 
 export default function MovementsModal({ item, onClose }) {

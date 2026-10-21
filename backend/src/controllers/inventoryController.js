@@ -80,24 +80,6 @@ async function editInventory(req, res, next) {
   } catch (err) { next(err); }
 }
 
-async function adjustInventory(req, res, next) {
-  try {
-    const { id } = req.params;
-    const { delta } = req.body;
-
-    const existing = await getInventoryById(id);
-    if (!existing) return res.status(404).json({ message: 'Inventory record not found' });
-
-    const projected = Number(existing.quantity_on_hand) + Number(delta);
-    if (projected < 0) {
-      return res.status(400).json({ message: `Adjustment would result in negative stock (current: ${existing.quantity_on_hand})` });
-    }
-
-    const entry = await adjustInventoryQuantity(id, delta);
-    res.json({ message: 'Inventory adjusted', entry });
-  } catch (err) { next(err); }
-}
-
 async function removeInventoryEntry(req, res, next) {
   try {
     const { id } = req.params;
@@ -127,8 +109,8 @@ async function getMovements(req, res, next) {
   try {
     const id = Number(req.params.id);
     if (!(await getInventoryById(id))) return res.status(404).json({ message: 'Inventory record not found' });
-    const page = Number(req.query.page) || 1;
-    const pageSize = Number(req.query.pageSize) || 25;
+    const page = Math.max(1, Math.trunc(Number(req.query.page)) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(req.query.pageSize)) || 25));
     const { rows, total } = await listMovements(id, pageSize, (page - 1) * pageSize);
     res.json({ rows, total, page, page_size: pageSize, page_count: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (err) { next(err); }

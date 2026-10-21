@@ -10,7 +10,7 @@ async function getDailyItemSales(windowDays) {
       FROM transactions t
       JOIN transaction_items ti ON ti.transaction_id = t.transaction_id
       JOIN branches b ON b.branch_id = t.branch_id AND b.is_active = true
-      WHERE t.status = 'paid'
+      WHERE t.status IN ('paid','unpaid')
         AND (t.transaction_at AT TIME ZONE '${TZ}')::date >= (NOW() AT TIME ZONE '${TZ}')::date - $1::int
         AND (t.transaction_at AT TIME ZONE '${TZ}')::date <  (NOW() AT TIME ZONE '${TZ}')::date
       GROUP BY 1, 2, 3`,
@@ -24,7 +24,7 @@ async function getFirstSaleDays() {
   const { rows } = await pool.query(
     `SELECT branch_id,
             to_char(MIN((transaction_at AT TIME ZONE '${TZ}')::date), 'YYYY-MM-DD') AS first_day
-      FROM transactions WHERE status = 'paid' GROUP BY branch_id`
+      FROM transactions WHERE status IN ('paid', 'unpaid') GROUP BY branch_id`
   );
   return new Map(rows.map((r) => [r.branch_id, r.first_day]));
 }
@@ -156,7 +156,7 @@ async function getBranchPaceStats(windowDays) {
     LEFT JOIN (
       SELECT branch_id, transaction_id, transaction_at AT TIME ZONE '${TZ}' AS local_ts
       FROM transactions
-      WHERE status = 'paid' AND transaction_at >= NOW() - (($1::int + 2) * INTERVAL '1 day')
+      WHERE status IN ('paid','unpaid') AND transaction_at >= NOW() - (($1::int + 2) * INTERVAL '1 day')
     ) t ON t.branch_id = b.branch_id
         AND t.local_ts::date >= n.now_ts::date - $1::int
         AND t.local_ts::time <= n.now_ts::time
@@ -179,7 +179,7 @@ async function getTopItemsToday() {
     FROM transaction_items ti
     JOIN transactions t ON t.transaction_id = ti.transaction_id
     JOIN menu_items mi ON mi.item_id = ti.item_id
-    WHERE t.status = 'paid'
+    WHERE t.status IN ('paid','unpaid')
       AND (t.transaction_at AT TIME ZONE '${TZ}')::date = (NOW() AT TIME ZONE '${TZ}')::date
     GROUP BY t.branch_id, ti.item_id, mi.item_name
   `);
